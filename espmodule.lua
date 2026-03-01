@@ -52,25 +52,40 @@ local function isAdmin(plr)
     return isAdm
 end
 
--- Count admins across ALL server players (not just rendered)
-local function countAllAdmins()
-    local count = 0
-    local names = {}
-    -- If external script already computed this, use it
-    if M.AdminCount and M.AdminCount > 0 and M.AdminNames then
-        return M.AdminCount, M.AdminNames
-    end
-    for _, plr in ipairs(Players:GetPlayers()) do
-        if plr ~= LP then
-            pcall(function()
-                if isAdmin(plr) then
-                    count = count + 1
-                    table.insert(names, plr.DisplayName or plr.Name)
+-- Background admin scan (run in separate thread, not every frame)
+local cachedAdminCount = 0
+local cachedAdminNames = {}
+local adminScanRunning = false
+
+local function runAdminScan()
+    if adminScanRunning then return end
+    adminScanRunning = true
+    task.spawn(function()
+        while M.AdminEnabled or M.AdminListEnabled do
+            local count = 0
+            local names = {}
+            -- Use external data if available
+            if M.AdminCount and M.AdminCount > 0 and M.AdminNames then
+                count = M.AdminCount
+                names = M.AdminNames
+            else
+                for _, plr in ipairs(Players:GetPlayers()) do
+                    if plr ~= LP then
+                        pcall(function()
+                            if isAdmin(plr) then
+                                count = count + 1
+                                table.insert(names, plr.DisplayName or plr.Name)
+                            end
+                        end)
+                    end
                 end
-            end)
+            end
+            cachedAdminCount = count
+            cachedAdminNames = names
+            task.wait(10) -- re-scan every 10 seconds
         end
-    end
-    return count, names
+        adminScanRunning = false
+    end)
 end
 
 local function alive(p)
@@ -418,15 +433,11 @@ RunService.Heartbeat:Connect(function()
             adminLabel.Center = false
             adminLabel.Outline = true
             adminLabel.Color = C3(255,0,0)
+            runAdminScan() -- start background scan when label first shown
         end
-        local totalAdmins, adminNames = countAllAdmins()
         local vp = Camera and Camera.ViewportSize or Vector2.new(1920,1080)
-        adminLabel.Position = Vector2.new(vp.X - 200, 40) + M.AdminListOffset
-        if totalAdmins > 0 then
-            adminLabel.Text = "Admins In Server (" .. totalAdmins .. "): " .. table.concat(adminNames, ", ")
-        else
-            adminLabel.Text = "Admins In Server: 0"
-        end
+        adminLabel.Position = Vector2.new(vp.X - 160, 10) + M.AdminListOffset
+        adminLabel.Text = "Admins: " .. cachedAdminCount
         adminLabel.Visible = true
     elseif adminLabel then
         adminLabel.Visible = false
@@ -455,13 +466,13 @@ function API:SetNameEsp(s) M.NameEnabled = s end
 function API:SetHealthEsp(s) M.HealthEnabled = s end
 function API:SetTracers(s) M.TracersEnabled = s end
 function API:SetTeamEsp(s) M.TeamEnabled = s end
-function API:SetAdminEsp(s) M.AdminEnabled = s end
+function API:SetAdminEsp(s) M.AdminEnabled = s; if s then runAdminScan() end end
 function API:SetAdminBoxes(s) M.AdminBoxEnabled = s end
 function API:SetAdminNames(s) M.AdminNameEnabled = s end
 function API:SetAdminTracers(s) M.AdminTracersEnabled = s end
 function API:SetAdminSkeleton(s) M.AdminSkeletonEnabled = s end
 function API:SetAdminTeamEsp(s) M.AdminTeamEnabled = s end
-function API:SetAdminList(s) M.AdminListEnabled = s end
+function API:SetAdminList(s) M.AdminListEnabled = s; if s then runAdminScan() end end
 function API:SetSkeletonEsp(s)
     M.SkeletonEnabled = s
     if s then

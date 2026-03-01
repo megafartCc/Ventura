@@ -502,11 +502,37 @@ local function ESP(plr)
         lastToolName = nil
     end
 
-    local function Updater()
-        local connection
-        connection = RunService.RenderStepped
-            :Connect(function()
-                if
+    -- Store library reference so the shared master loop can render this player
+    trackedPlayers[plr] = trackedPlayers[plr] or {}
+    trackedPlayers[plr].Library = library
+    trackedPlayers[plr].DestroyHotbarGui = destroyHotbarGui
+    trackedPlayers[plr].EnsureHotbarGui = ensureHotbarGui
+    trackedPlayers[plr].SetViewportToTool = setViewportToTool
+    trackedPlayers[plr].HotbarGuiRef = function() return hotbarGui end
+    trackedPlayers[plr].SetHotbarGui = function(v) hotbarGui = v end
+end
+
+-- ============================================================
+-- SINGLE SHARED MASTER LOOP (Heartbeat — 1 connection total)
+-- ============================================================
+RunService.Heartbeat:Connect(function()
+    for plr, data in pairs(trackedPlayers) do
+        local library = data.Library
+        if not library then continue end
+
+        local destroyHotbarGui = data.DestroyHotbarGui
+        local ensureHotbarGui  = data.EnsureHotbarGui
+        local setViewportToTool= data.SetViewportToTool
+
+        local function hideAll()
+            for _, d in pairs(library) do
+                if d and d.Visible then d.Visible = false end
+            end
+            if destroyHotbarGui then destroyHotbarGui() end
+        end
+
+        local ok = pcall(function()
+        if
                     plr.Character ~= nil
                     and plr.Character:FindFirstChild("Humanoid") ~= nil
                     and plr.Character:FindFirstChild("HumanoidRootPart") ~= nil
@@ -698,41 +724,28 @@ local function ESP(plr)
                         destroyHotbarGui()
                     end
                 else
-                    for _, drawing in pairs(library) do
-                        if drawing and drawing.Visible then
-                            drawing.Visible = false
-                        end
-                    end
-                    destroyHotbarGui()
+                    hideAll()
                     if Players:FindFirstChild(plr.Name) == nil then
-                        connection:Disconnect()
                         for _, drawing in pairs(library) do
                             pcall(function()
-                                if drawing and drawing.Remove then
-                                    drawing:Remove()
-                                end
+                                if drawing and drawing.Remove then drawing:Remove() end
                             end)
                         end
-                        library = nil
-                        if trackedPlayers[plr] then
-                            if trackedPlayers[plr].SkeletonConnection then
-                                safeDisconnectConn(trackedPlayers[plr].SkeletonConnection)
-                            end
-                            if trackedPlayers[plr].SkeletonLimbs then
-                                for _, line in pairs(trackedPlayers[plr].SkeletonLimbs) do
-                                    pcall(function()
-                                        line:Remove()
-                                    end)
-                                end
-                            end
-                            trackedPlayers[plr] = nil
+                        if data.SkeletonConnection then
+                            safeDisconnectConn(data.SkeletonConnection)
                         end
+                        if data.SkeletonLimbs then
+                            for _, line in pairs(data.SkeletonLimbs) do
+                                pcall(function() line:Remove() end)
+                            end
+                        end
+                        trackedPlayers[plr] = nil
                     end
                 end
-            end)
-    end
-    coroutine.wrap(Updater)()
-end
+        end) -- end pcall
+        if not ok then hideAll() end
+    end -- end for plr
+end) -- end Heartbeat
 
 local function DrawSkeletonESP(plr)
     local data = trackedPlayers[plr]
@@ -884,18 +897,20 @@ local function DrawSkeletonESP(plr)
     end
 
     local connection
-    connection = RunService.RenderStepped:Connect(function()
+    connection = RunService.Heartbeat:Connect(function()
         if not skeletonEspEnabled or not plr.Character or plr.Character.Humanoid.Health <= 0 then
             SetVisible(false)
             return
         end
 
         local isVisible = false
-        if plr.Character.Humanoid.RigType == Enum.HumanoidRigType.R15 then
-            isVisible = UpdateR15Skeleton(plr.Character)
-        else
-            isVisible = UpdateR6Skeleton(plr.Character)
-        end
+        pcall(function()
+            if plr.Character.Humanoid.RigType == Enum.HumanoidRigType.R15 then
+                isVisible = UpdateR15Skeleton(plr.Character)
+            else
+                isVisible = UpdateR6Skeleton(plr.Character)
+            end
+        end)
 
         if isVisible then
             if not limbs.Head_UpperTorso.Visible then

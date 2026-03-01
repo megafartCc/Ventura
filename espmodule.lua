@@ -1,4 +1,5 @@
 local Players = game:GetService("Players")
+local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local Camera = workspace.CurrentCamera
 local LP = Players.LocalPlayer
@@ -12,13 +13,35 @@ M.NameEnabled = false
 M.HealthEnabled = false
 M.TracersEnabled = false
 M.SkeletonEnabled = false
+M.TeamEnabled = false
 M.MaxDist = 500
+M.AdminEnabled = false
+local ADMIN_GROUP_ID = 17180419
+local ADMIN_ROLES = {
+    ["Moderator"] = true,
+    ["Administrator"] = true,
+    ["Collaborators"] = true,
+    ["Team Member"] = true,
+    ["Developer"] = true,
+    ["Operations Manager"] = true,
+    ["Founder & CEO"] = true,
+    ["Root"] = true,
+}
 
 local tracked = {}
 
 local function w2s(p)
     local v, on = Camera:WorldToViewportPoint(p)
     return V2(v.X, v.Y), on, v.Z
+end
+
+local function isAdmin(plr)
+    if not M.AdminEnabled then return false end
+    local ok, role = pcall(function()
+        return plr:GetRoleInGroup(ADMIN_GROUP_ID)
+    end)
+    if not ok or not role then return false end
+    return ADMIN_ROLES[role] == true
 end
 
 local function alive(p)
@@ -53,6 +76,13 @@ local function make(plr)
         d.name.Center = true
         d.name.Outline = true
 
+        d.team = Drawing.new("Text")
+        d.team.Visible = false
+        d.team.Color = C3(255,255,255)
+        d.team.Size = 13
+        d.team.Center = false
+        d.team.Outline = true
+
         d.hpBg = Drawing.new("Line")
         d.hpBg.Visible = false
         d.hpBg.Color = C3(0,0,0)
@@ -75,6 +105,7 @@ local function nuke(plr)
         for _, l in ipairs(d.box or {}) do l:Remove() end
         if d.tracer then d.tracer:Remove() end
         if d.name then d.name:Remove() end
+        if d.team then d.team:Remove() end
         if d.hpBg then d.hpBg:Remove() end
         if d.hpFill then d.hpFill:Remove() end
         for _, l in ipairs(d.skel or {}) do l:Remove() end
@@ -114,6 +145,7 @@ local function hideD(d)
         for _, l in ipairs(d.box or {}) do l.Visible = false end
         if d.tracer then d.tracer.Visible = false end
         if d.name then d.name.Visible = false end
+        if d.team then d.team.Visible = false end
         if d.hpBg then d.hpBg.Visible = false end
         if d.hpFill then d.hpFill.Visible = false end
         for _, l in ipairs(d.skel or {}) do l.Visible = false end
@@ -244,8 +276,11 @@ RunService.Heartbeat:Connect(function()
             local h = math.abs(bP.Y - tP.Y)
             local w = h / 2
             local cx, cy = sv.X, sv.Y
+            local adm = isAdmin(plr)
+            local baseColor = adm and C3(255,0,0) or C3(255,255,255)
 
             if M.BoxEnabled then
+                for i=1,4 do d.box[i].Color = baseColor end
                 d.box[1].From = V2(cx-w, cy-h/2)
                 d.box[1].To = V2(cx+w, cy-h/2)
                 d.box[1].Visible = true
@@ -263,11 +298,37 @@ RunService.Heartbeat:Connect(function()
             end
 
             if M.NameEnabled then
+                d.name.Color = baseColor
                 d.name.Text = plr.DisplayName or plr.Name
                 d.name.Position = V2(cx, cy - h/2 - 18)
                 d.name.Visible = true
             else
                 d.name.Visible = false
+            end
+
+            if M.TeamEnabled then
+                local teamName = "No Team"
+                if plr.Team then
+                    teamName = plr.Team.Name
+                end
+                d.team.Text = adm and ("[STAFF] "..teamName) or teamName
+                d.team.Color = plr.TeamColor and plr.TeamColor.Color or baseColor
+
+                if M.BoxEnabled then
+                    d.team.Position = V2(cx + w + 8, cy - h / 2)
+                    d.team.Visible = true
+                else
+                    local head = char:FindFirstChild("Head") or hrp
+                    local hv, hon, hz = w2s(head.Position + Vector3.new(0, 0.45, 0))
+                    if hon and hz > 0 then
+                        d.team.Position = V2(hv.X + 10, hv.Y - 8)
+                        d.team.Visible = true
+                    else
+                        d.team.Visible = false
+                    end
+                end
+            else
+                d.team.Visible = false
             end
 
             if M.HealthEnabled then
@@ -288,6 +349,7 @@ RunService.Heartbeat:Connect(function()
             end
 
             if M.TracersEnabled then
+                d.tracer.Color = baseColor
                 local ox = Camera.ViewportSize.X / 2
                 local oy = Camera.ViewportSize.Y
                 d.tracer.From = V2(ox, oy)
@@ -298,6 +360,7 @@ RunService.Heartbeat:Connect(function()
             end
 
             if M.SkeletonEnabled then
+                for _, l in ipairs(d.skel or {}) do l.Color = baseColor end
                 if not d.skelBuilt then buildSkel(plr) end
                 if hum.RigType == Enum.HumanoidRigType.R15 then
                     drawSkelR15(d, char)
@@ -334,6 +397,8 @@ function API:SetBoxEsp(s) M.BoxEnabled = s end
 function API:SetNameEsp(s) M.NameEnabled = s end
 function API:SetHealthEsp(s) M.HealthEnabled = s end
 function API:SetTracers(s) M.TracersEnabled = s end
+function API:SetTeamEsp(s) M.TeamEnabled = s end
+function API:SetAdminEsp(s) M.AdminEnabled = s end
 function API:SetSkeletonEsp(s)
     M.SkeletonEnabled = s
     if s then

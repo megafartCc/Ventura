@@ -22,6 +22,7 @@ M.AdminTracersEnabled = true
 M.AdminSkeletonEnabled = true
 M.AdminTeamEnabled = true
 M.AdminListEnabled = false
+M.AdminListOffset = Vector2.new(0,0)
 local ADMIN_GROUP_ID = 17180419
 local ADMIN_ROLES = {
     ["Moderator"] = true,
@@ -399,7 +400,7 @@ RunService.Heartbeat:Connect(function()
             adminLabel.Color = C3(255,0,0)
         end
         local vp = Camera and Camera.ViewportSize or Vector2.new(1920,1080)
-        adminLabel.Position = Vector2.new(vp.X - 200, 40)
+        adminLabel.Position = Vector2.new(vp.X - 200, 40) + M.AdminListOffset
         adminLabel.Text = "Admins In Server: "..tostring(adminCount)
         adminLabel.Visible = true
     elseif adminLabel then

@@ -24,18 +24,12 @@ M.AdminTeamEnabled = true
 M.AdminListEnabled = false
 M.AdminListOffset = Vector2.new(0,0)
 local ADMIN_GROUP_ID = 17180419
-local ADMIN_ROLES = {
-    ["Moderator"] = true,
-    ["Administrator"] = true,
-    ["Collaborators"] = true,
-    ["Team Member"] = true,
-    ["Developer"] = true,
-    ["Operations Manager"] = true,
-    ["Founder & CEO"] = true,
-    ["Root"] = true,
-}
+local ADMIN_MIN_RANK = 252
 
 local tracked = {}
+local adminCache = {} -- cache: player -> bool, avoids spamming API
+local adminCacheTime = {} -- cache: player -> tick()
+local CACHE_TTL = 30 -- re-check every 30 seconds
 
 local function w2s(p)
     local v, on = Camera:WorldToViewportPoint(p)
@@ -44,11 +38,39 @@ end
 
 local function isAdmin(plr)
     if not M.AdminEnabled then return false end
-    local ok, role = pcall(function()
-        return plr:GetRoleInGroup(ADMIN_GROUP_ID)
+    -- Check cache first
+    if adminCache[plr] ~= nil and adminCacheTime[plr] and (tick() - adminCacheTime[plr]) < CACHE_TTL then
+        return adminCache[plr]
+    end
+    -- Use rank-based check (same as game's IsDeveloper)
+    local ok, result = pcall(function()
+        return plr:IsInGroup(ADMIN_GROUP_ID) and plr:GetRankInGroup(ADMIN_GROUP_ID) >= ADMIN_MIN_RANK
     end)
-    if not ok or not role then return false end
-    return ADMIN_ROLES[role] == true
+    local isAdm = ok and result == true
+    adminCache[plr] = isAdm
+    adminCacheTime[plr] = tick()
+    return isAdm
+end
+
+-- Count admins across ALL server players (not just rendered)
+local function countAllAdmins()
+    local count = 0
+    local names = {}
+    -- If external script already computed this, use it
+    if M.AdminCount and M.AdminCount > 0 and M.AdminNames then
+        return M.AdminCount, M.AdminNames
+    end
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= LP then
+            pcall(function()
+                if isAdmin(plr) then
+                    count = count + 1
+                    table.insert(names, plr.DisplayName or plr.Name)
+                end
+            end)
+        end
+    end
+    return count, names
 end
 
 local function alive(p)
@@ -258,7 +280,6 @@ end
 
 RunService.Heartbeat:Connect(function()
     Camera = workspace.CurrentCamera
-    local adminCount = 0
     for plr, d in pairs(tracked) do
         pcall(function()
             if not alive(plr) then
@@ -287,7 +308,6 @@ RunService.Heartbeat:Connect(function()
             local w = h / 2
             local cx, cy = sv.X, sv.Y
             local adm = isAdmin(plr)
-            if adm then adminCount = adminCount + 1 end
             local baseColor = adm and C3(255,0,0) or C3(255,255,255)
 
             local boxOn   = adm and M.AdminBoxEnabled     or M.BoxEnabled
@@ -399,9 +419,14 @@ RunService.Heartbeat:Connect(function()
             adminLabel.Outline = true
             adminLabel.Color = C3(255,0,0)
         end
+        local totalAdmins, adminNames = countAllAdmins()
         local vp = Camera and Camera.ViewportSize or Vector2.new(1920,1080)
         adminLabel.Position = Vector2.new(vp.X - 200, 40) + M.AdminListOffset
-        adminLabel.Text = "Admins In Server: "..tostring(adminCount)
+        if totalAdmins > 0 then
+            adminLabel.Text = "Admins In Server (" .. totalAdmins .. "): " .. table.concat(adminNames, ", ")
+        else
+            adminLabel.Text = "Admins In Server: 0"
+        end
         adminLabel.Visible = true
     elseif adminLabel then
         adminLabel.Visible = false

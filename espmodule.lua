@@ -24,35 +24,48 @@ M.AdminTeamEnabled = true
 M.AdminListEnabled = false
 M.AdminListOffset = Vector2.new(0,0)
 local ADMIN_GROUP_ID = 17180419
-local ADMIN_MIN_RANK = 252
+local ADMIN_ROLES = {
+    ["Moderator"] = true,
+    ["Administrator"] = true,
+    ["Collaborators"] = true,
+    ["Team Member"] = true,
+    ["Developer"] = true,
+    ["Operations Manager"] = true,
+    ["Founder & CEO"] = true,
+    ["Root"] = true,
+}
 
 local tracked = {}
-local adminCache = {} -- cache: player -> bool, avoids spamming API
-local adminCacheTime = {} -- cache: player -> tick()
-local CACHE_TTL = 30 -- re-check every 30 seconds
+local adminCache = {}
+local adminCacheTime = {}
+local CACHE_TTL = 30
 
 local function w2s(p)
     local v, on = Camera:WorldToViewportPoint(p)
     return V2(v.X, v.Y), on, v.Z
 end
 
-local function isAdmin(plr)
-    if not M.AdminEnabled then return false end
-    -- Check cache first
+-- Raw admin check (no toggle guard) — used by scanner
+local function checkAdmin(plr)
     if adminCache[plr] ~= nil and adminCacheTime[plr] and (tick() - adminCacheTime[plr]) < CACHE_TTL then
         return adminCache[plr]
     end
-    -- Use rank-based check (same as game's IsDeveloper)
-    local ok, result = pcall(function()
-        return plr:IsInGroup(ADMIN_GROUP_ID) and plr:GetRankInGroup(ADMIN_GROUP_ID) >= ADMIN_MIN_RANK
+    local ok, role = pcall(function()
+        return plr:GetRoleInGroup(ADMIN_GROUP_ID)
     end)
-    local isAdm = ok and result == true
+    local isAdm = ok and role and ADMIN_ROLES[role] == true
     adminCache[plr] = isAdm
     adminCacheTime[plr] = tick()
     return isAdm
 end
 
--- Background admin scan (run in separate thread, not every frame)
+-- Guarded admin check — used by ESP rendering (only highlights when toggle is on)
+local function isAdmin(plr)
+    if not M.AdminEnabled then return false end
+    return checkAdmin(plr)
+end
+
+-- Background admin scan (uses checkAdmin, works regardless of toggles)
 local cachedAdminCount = 0
 local cachedAdminNames = {}
 local adminScanRunning = false
@@ -64,7 +77,6 @@ local function runAdminScan()
         while M.AdminEnabled or M.AdminListEnabled do
             local count = 0
             local names = {}
-            -- Use external data if available
             if M.AdminCount and M.AdminCount > 0 and M.AdminNames then
                 count = M.AdminCount
                 names = M.AdminNames
@@ -72,7 +84,7 @@ local function runAdminScan()
                 for _, plr in ipairs(Players:GetPlayers()) do
                     if plr ~= LP then
                         pcall(function()
-                            if isAdmin(plr) then
+                            if checkAdmin(plr) then
                                 count = count + 1
                                 table.insert(names, plr.DisplayName or plr.Name)
                             end
@@ -82,7 +94,7 @@ local function runAdminScan()
             end
             cachedAdminCount = count
             cachedAdminNames = names
-            task.wait(10) -- re-scan every 10 seconds
+            task.wait(10)
         end
         adminScanRunning = false
     end)

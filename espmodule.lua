@@ -32,27 +32,23 @@ local function w2s(p)
     return V2(v.X, v.Y), on, v.Z
 end
 
--- Try to get the game's own Permissions module
-local GamePerms = nil
-pcall(function()
-    local permsModule = game:GetService("ReplicatedStorage"):FindFirstChild("Permissions")
-    if permsModule then
-        GamePerms = require(permsModule)
-    end
-end)
-
--- Admin check: tries game module first, then IsInGroup+rank, then role name
+-- Admin check: anyone in the group with rank > 1 (not regular Member)
+-- Member = rank 1, Moderator+ = rank > 1
 local function checkAdmin(plr)
-    -- Method 1: Game's own IsDeveloper (most accurate)
-    if GamePerms and GamePerms.IsDeveloper then
-        local ok, result = pcall(GamePerms.IsDeveloper, plr)
-        if ok then return result == true end
-    end
-    -- Method 2: IsInGroup + GetRankInGroup (same logic as game)
     local ok, result = pcall(function()
-        return plr:IsInGroup(ADMIN_GROUP_ID) and plr:GetRankInGroup(ADMIN_GROUP_ID) >= 252
+        if not plr:IsInGroup(ADMIN_GROUP_ID) then return false end
+        local rank = plr:GetRankInGroup(ADMIN_GROUP_ID)
+        if rank > 1 then return true end
+        return false
     end)
     if ok then return result == true end
+    -- Fallback: try role name check
+    local ok2, role = pcall(function()
+        return plr:GetRoleInGroup(ADMIN_GROUP_ID)
+    end)
+    if ok2 and role and role ~= "" and role ~= "Member" and role ~= "Guest" then
+        return true
+    end
     return false
 end
 
@@ -62,17 +58,11 @@ local function isAdmin(plr)
     return checkAdmin(plr)
 end
 
--- Admin list: scans ALL players, cached, updated on join/leave
+-- Admin list: scans ALL players, updated on join/leave
 local cachedAdminCount = 0
-local adminListConns = {}
 
 local function refreshAdminList()
     local count = 0
-    -- If external ventura.lua already set count, use it
-    if M.AdminCount and M.AdminCount > 0 then
-        cachedAdminCount = M.AdminCount
-        return
-    end
     for _, plr in ipairs(Players:GetPlayers()) do
         if plr ~= LP then
             pcall(function()
@@ -84,6 +74,9 @@ local function refreshAdminList()
     end
     cachedAdminCount = count
 end
+
+-- Scan immediately on load so count is ready
+task.spawn(refreshAdminList)
 
 local function alive(p)
     local c = p and p.Character

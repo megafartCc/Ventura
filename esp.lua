@@ -169,17 +169,19 @@ end
 
 local function NewQuad(thickness, color)
     if hasDrawing then
-        local quad = Drawing.new("Quad")
-        quad.Visible = false
-        quad.PointA = Vector2.new(0, 0)
-        quad.PointB = Vector2.new(0, 0)
-        quad.PointC = Vector2.new(0, 0)
-        quad.PointD = Vector2.new(0, 0)
-        quad.Color = color
-        quad.Filled = false
-        quad.Thickness = thickness
-        quad.Transparency = 1
-        return quad
+        local success, quad = pcall(function() return Drawing.new("Quad") end)
+        if success and quad then
+            quad.Visible = false
+            quad.PointA = Vector2.new(0, 0)
+            quad.PointB = Vector2.new(0, 0)
+            quad.PointC = Vector2.new(0, 0)
+            quad.PointD = Vector2.new(0, 0)
+            quad.Color = color
+            quad.Filled = false
+            quad.Thickness = thickness
+            quad.Transparency = 1
+            return quad
+        end
     end
     local quad = {
         Visible = false,
@@ -198,14 +200,16 @@ end
 
 local function NewLine(thickness, color)
     if hasDrawing then
-        local line = Drawing.new("Line")
-        line.Visible = false
-        line.From = Vector2.new(0, 0)
-        line.To = Vector2.new(0, 0)
-        line.Color = color
-        line.Thickness = thickness
-        line.Transparency = 1
-        return line
+        local success, line = pcall(function() return Drawing.new("Line") end)
+        if success and line then
+            line.Visible = false
+            line.From = Vector2.new(0, 0)
+            line.To = Vector2.new(0, 0)
+            line.Color = color
+            line.Thickness = thickness
+            line.Transparency = 1
+            return line
+        end
     end
 
     local line = {

@@ -212,7 +212,7 @@ local function buildSkeleton(plr)
 
         if humanoid.RigType == Enum.HumanoidRigType.R6 then
             d.skeletonMode = "R6"
-            for _ = 1, 7 do
+            for _ = 1, 8 do
                 table.insert(d.skeletonLines, createSkeletonLine())
             end
             return
@@ -250,57 +250,69 @@ local function updateR6Skeleton(d, char)
         return
     end
 
-    local head2d, onHead = Camera:WorldToViewportPoint(head.Position)
-    local torsoUpper2d, onTorsoTop = Camera:WorldToViewportPoint(torso.Position + Vector3.new(0, torso.Size.Y * 0.5, 0))
-    local torsoLower2d, onTorsoBottom = Camera:WorldToViewportPoint(torso.Position + Vector3.new(0, -torso.Size.Y * 0.5, 0))
-    local leftArm2d, onLeftArm = Camera:WorldToViewportPoint(leftArm.Position + Vector3.new(0, -leftArm.Size.Y * 0.5, 0))
-    local rightArm2d, onRightArm = Camera:WorldToViewportPoint(rightArm.Position + Vector3.new(0, -rightArm.Size.Y * 0.5, 0))
-    local leftLeg2d, onLeftLeg = Camera:WorldToViewportPoint(leftLeg.Position + Vector3.new(0, -leftLeg.Size.Y * 0.5, 0))
-    local rightLeg2d, onRightLeg = Camera:WorldToViewportPoint(rightLeg.Position + Vector3.new(0, -rightLeg.Size.Y * 0.5, 0))
+    local function worldPoint(part, localOffset)
+        return part.CFrame:PointToWorldSpace(localOffset)
+    end
 
-    local leftShoulder2d, onLeftShoulder = Camera:WorldToViewportPoint(torso.Position + Vector3.new(-torso.Size.X * 0.5, torso.Size.Y * 0.25, 0))
-    local rightShoulder2d, onRightShoulder = Camera:WorldToViewportPoint(torso.Position + Vector3.new(torso.Size.X * 0.5, torso.Size.Y * 0.25, 0))
-    local leftHip2d, onLeftHip = Camera:WorldToViewportPoint(torso.Position + Vector3.new(-torso.Size.X * 0.25, -torso.Size.Y * 0.5, 0))
-    local rightHip2d, onRightHip = Camera:WorldToViewportPoint(torso.Position + Vector3.new(torso.Size.X * 0.25, -torso.Size.Y * 0.5, 0))
+    local function jointWorldPos(part, jointName, fallbackOffset)
+        local joint = part and part:FindFirstChild(jointName)
+        if joint and joint:IsA("Motor6D") and joint.Part0 then
+            return (joint.Part0.CFrame * joint.C0).Position
+        end
+        if part and fallbackOffset then
+            return worldPoint(part, fallbackOffset)
+        end
+        return nil
+    end
 
-    if not (onHead and onTorsoTop and onTorsoBottom and onLeftArm and onRightArm and onLeftLeg and onRightLeg and onLeftShoulder and onRightShoulder and onLeftHip and onRightHip) then
+    local headTop = worldPoint(head, Vector3.new(0, head.Size.Y * 0.5, 0))
+    local neckPos = jointWorldPos(torso, "Neck", Vector3.new(0, torso.Size.Y * 0.5, 0))
+    local leftShoulderPos = jointWorldPos(torso, "Left Shoulder", Vector3.new(-torso.Size.X * 0.5, torso.Size.Y * 0.25, 0))
+    local rightShoulderPos = jointWorldPos(torso, "Right Shoulder", Vector3.new(torso.Size.X * 0.5, torso.Size.Y * 0.25, 0))
+    local leftHipPos = jointWorldPos(torso, "Left Hip", Vector3.new(-torso.Size.X * 0.25, -torso.Size.Y * 0.5, 0))
+    local rightHipPos = jointWorldPos(torso, "Right Hip", Vector3.new(torso.Size.X * 0.25, -torso.Size.Y * 0.5, 0))
+
+    local leftArmEnd = worldPoint(leftArm, Vector3.new(0, -leftArm.Size.Y * 0.5, 0))
+    local rightArmEnd = worldPoint(rightArm, Vector3.new(0, -rightArm.Size.Y * 0.5, 0))
+    local leftLegEnd = worldPoint(leftLeg, Vector3.new(0, -leftLeg.Size.Y * 0.5, 0))
+    local rightLegEnd = worldPoint(rightLeg, Vector3.new(0, -rightLeg.Size.Y * 0.5, 0))
+
+    if not (neckPos and leftShoulderPos and rightShoulderPos and leftHipPos and rightHipPos) then
         for _, ln in ipairs(d.skeletonLines or {}) do
             if ln then ln.Visible = false end
         end
         return
     end
 
-    if head2d.Z <= 0 or torsoUpper2d.Z <= 0 or torsoLower2d.Z <= 0 then
-        for _, ln in ipairs(d.skeletonLines or {}) do
-            if ln then ln.Visible = false end
-        end
-        return
-    end
+    local shoulderCenter = (leftShoulderPos + rightShoulderPos) * 0.5
+    local hipCenter = (leftHipPos + rightHipPos) * 0.5
+    local r6Segments = {
+        {headTop, neckPos},
+        {neckPos, shoulderCenter},
+        {shoulderCenter, hipCenter},
+        {leftShoulderPos, rightShoulderPos},
+        {leftShoulderPos, leftArmEnd},
+        {rightShoulderPos, rightArmEnd},
+        {leftHipPos, leftLegEnd},
+        {rightHipPos, rightLegEnd},
+    }
 
-    local shoulderY = (leftShoulder2d.Y + rightShoulder2d.Y) * 0.5
-    local hipY = (leftHip2d.Y + rightHip2d.Y) * 0.5
-    local leftShoulder = Vector2.new(leftShoulder2d.X, shoulderY)
-    local rightShoulder = Vector2.new(rightShoulder2d.X, shoulderY)
-    local leftHip = Vector2.new(leftHip2d.X, hipY)
-    local rightHip = Vector2.new(rightHip2d.X, hipY)
-
-    local headPoint = Vector2.new(head2d.X, head2d.Y)
-    local torsoUpperPoint = Vector2.new(torsoUpper2d.X, torsoUpper2d.Y)
-    local torsoLowerPoint = Vector2.new(torsoLower2d.X, torsoLower2d.Y)
-    local leftArmPoint = Vector2.new(leftArm2d.X, leftArm2d.Y)
-    local rightArmPoint = Vector2.new(rightArm2d.X, rightArm2d.Y)
-    local leftLegPoint = Vector2.new(leftLeg2d.X, leftLeg2d.Y)
-    local rightLegPoint = Vector2.new(rightLeg2d.X, rightLeg2d.Y)
-
-    local color = Color3.fromRGB(255, 255, 255)
     local lines = d.skeletonLines
-    setSkeletonLine2D(lines[1], headPoint, torsoUpperPoint, 2, color)
-    setSkeletonLine2D(lines[2], torsoUpperPoint, torsoLowerPoint, 2, color)
-    setSkeletonLine2D(lines[3], leftShoulder, rightShoulder, 2, color)
-    setSkeletonLine2D(lines[4], leftShoulder, leftArmPoint, 2, color)
-    setSkeletonLine2D(lines[5], rightShoulder, rightArmPoint, 2, color)
-    setSkeletonLine2D(lines[6], leftHip, leftLegPoint, 2, color)
-    setSkeletonLine2D(lines[7], rightHip, rightLegPoint, 2, color)
+    local color = Color3.fromRGB(255, 255, 255)
+    for i, ln in ipairs(lines) do
+        local seg = r6Segments[i]
+        if not ln or not seg or not seg[1] or not seg[2] then
+            if ln then ln.Visible = false end
+        else
+            local s1, on1 = Camera:WorldToViewportPoint(seg[1])
+            local s2, on2 = Camera:WorldToViewportPoint(seg[2])
+            if (on1 or on2) and s1.Z > 0 and s2.Z > 0 then
+                setSkeletonLine2D(ln, Vector2.new(s1.X, s1.Y), Vector2.new(s2.X, s2.Y), 2, color)
+            else
+                ln.Visible = false
+            end
+        end
+    end
 end
 
 local function hideAll(d)

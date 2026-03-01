@@ -16,6 +16,12 @@ M.SkeletonEnabled = false
 M.TeamEnabled = false
 M.MaxDist = 500
 M.AdminEnabled = false
+M.AdminBoxEnabled = true
+M.AdminNameEnabled = true
+M.AdminTracersEnabled = true
+M.AdminSkeletonEnabled = true
+M.AdminTeamEnabled = true
+M.AdminListEnabled = false
 local ADMIN_GROUP_ID = 17180419
 local ADMIN_ROLES = {
     ["Moderator"] = true,
@@ -279,7 +285,13 @@ RunService.Heartbeat:Connect(function()
             local adm = isAdmin(plr)
             local baseColor = adm and C3(255,0,0) or C3(255,255,255)
 
-            if M.BoxEnabled then
+            local boxOn   = adm and M.AdminBoxEnabled     or M.BoxEnabled
+            local nameOn  = adm and M.AdminNameEnabled    or M.NameEnabled
+            local teamOn  = adm and M.AdminTeamEnabled    or M.TeamEnabled
+            local tracersOn = adm and M.AdminTracersEnabled or M.TracersEnabled
+            local skelOn  = adm and M.AdminSkeletonEnabled or M.SkeletonEnabled
+
+            if boxOn then
                 for i=1,4 do d.box[i].Color = baseColor end
                 d.box[1].From = V2(cx-w, cy-h/2)
                 d.box[1].To = V2(cx+w, cy-h/2)
@@ -297,7 +309,7 @@ RunService.Heartbeat:Connect(function()
                 for i=1,4 do d.box[i].Visible = false end
             end
 
-            if M.NameEnabled then
+            if nameOn then
                 d.name.Color = baseColor
                 d.name.Text = plr.DisplayName or plr.Name
                 d.name.Position = V2(cx, cy - h/2 - 18)
@@ -306,7 +318,7 @@ RunService.Heartbeat:Connect(function()
                 d.name.Visible = false
             end
 
-            if M.TeamEnabled then
+            if teamOn then
                 local teamName = "No Team"
                 if plr.Team then
                     teamName = plr.Team.Name
@@ -314,7 +326,7 @@ RunService.Heartbeat:Connect(function()
                 d.team.Text = adm and ("[STAFF] "..teamName) or teamName
                 d.team.Color = plr.TeamColor and plr.TeamColor.Color or baseColor
 
-                if M.BoxEnabled then
+                if boxOn then
                     d.team.Position = V2(cx + w + 8, cy - h / 2)
                     d.team.Visible = true
                 else
@@ -348,7 +360,7 @@ RunService.Heartbeat:Connect(function()
                 d.hpFill.Visible = false
             end
 
-            if M.TracersEnabled then
+            if tracersOn then
                 d.tracer.Color = baseColor
                 local ox = Camera.ViewportSize.X / 2
                 local oy = Camera.ViewportSize.Y
@@ -359,7 +371,7 @@ RunService.Heartbeat:Connect(function()
                 d.tracer.Visible = false
             end
 
-            if M.SkeletonEnabled then
+            if skelOn then
                 for _, l in ipairs(d.skel or {}) do l.Color = baseColor end
                 if not d.skelBuilt then buildSkel(plr) end
                 if hum.RigType == Enum.HumanoidRigType.R15 then
@@ -399,6 +411,11 @@ function API:SetHealthEsp(s) M.HealthEnabled = s end
 function API:SetTracers(s) M.TracersEnabled = s end
 function API:SetTeamEsp(s) M.TeamEnabled = s end
 function API:SetAdminEsp(s) M.AdminEnabled = s end
+function API:SetAdminBoxes(s) M.AdminBoxEnabled = s end
+function API:SetAdminNames(s) M.AdminNameEnabled = s end
+function API:SetAdminTracers(s) M.AdminTracersEnabled = s end
+function API:SetAdminSkeleton(s) M.AdminSkeletonEnabled = s end
+function API:SetAdminTeamEsp(s) M.AdminTeamEnabled = s end
 function API:SetSkeletonEsp(s)
     M.SkeletonEnabled = s
     if s then

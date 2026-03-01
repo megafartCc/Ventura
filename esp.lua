@@ -19,6 +19,7 @@ local Config = {
 
 local tracked = {}
 local SkeletonGui
+local SKELETON_GUI_NAME = "Ventura_SkeletonESP"
 
 local function getSkeletonGui()
     if SkeletonGui and SkeletonGui.Parent then
@@ -35,8 +36,14 @@ local function getSkeletonGui()
         parent = game:GetService("CoreGui")
     end
 
+    for _, child in ipairs(parent:GetChildren()) do
+        if child:IsA("ScreenGui") and child.Name == SKELETON_GUI_NAME then
+            pcall(function() child:Destroy() end)
+        end
+    end
+
     local gui = Instance.new("ScreenGui")
-    gui.Name = "Ventura_SkeletonESP"
+    gui.Name = SKELETON_GUI_NAME
     gui.ResetOnSpawn = false
     gui.IgnoreGuiInset = true
     gui.DisplayOrder = 1000
@@ -211,10 +218,7 @@ local function buildSkeleton(plr)
         local rightFoot = char:FindFirstChild("RightFoot") or char:FindFirstChild("RightLowerLeg")
 
         if humanoid.RigType == Enum.HumanoidRigType.R6 then
-            d.skeletonMode = "R6"
-            for _ = 1, 8 do
-                table.insert(d.skeletonLines, createSkeletonLine())
-            end
+            d.skeletonMode = "R6_DISABLED"
             return
         end
 
@@ -233,86 +237,6 @@ local function buildSkeleton(plr)
             if rightLeg and rightFoot then addSkeletonSegment(d, rightLeg, rightFoot) end
         end
     end)
-end
-
-local function updateR6Skeleton(d, char)
-    local head = char:FindFirstChild("Head")
-    local torso = char:FindFirstChild("Torso")
-    local leftArm = char:FindFirstChild("Left Arm")
-    local rightArm = char:FindFirstChild("Right Arm")
-    local leftLeg = char:FindFirstChild("Left Leg")
-    local rightLeg = char:FindFirstChild("Right Leg")
-
-    if not (head and torso and leftArm and rightArm and leftLeg and rightLeg) then
-        for _, ln in ipairs(d.skeletonLines or {}) do
-            if ln then ln.Visible = false end
-        end
-        return
-    end
-
-    local function worldPoint(part, localOffset)
-        return part.CFrame:PointToWorldSpace(localOffset)
-    end
-
-    local function jointWorldPos(part, jointName, fallbackOffset)
-        local joint = part and part:FindFirstChild(jointName)
-        if joint and joint:IsA("Motor6D") and joint.Part0 then
-            return (joint.Part0.CFrame * joint.C0).Position
-        end
-        if part and fallbackOffset then
-            return worldPoint(part, fallbackOffset)
-        end
-        return nil
-    end
-
-    local headTop = worldPoint(head, Vector3.new(0, head.Size.Y * 0.5, 0))
-    local neckPos = jointWorldPos(torso, "Neck", Vector3.new(0, torso.Size.Y * 0.5, 0))
-    local leftShoulderPos = jointWorldPos(torso, "Left Shoulder", Vector3.new(-torso.Size.X * 0.5, torso.Size.Y * 0.25, 0))
-    local rightShoulderPos = jointWorldPos(torso, "Right Shoulder", Vector3.new(torso.Size.X * 0.5, torso.Size.Y * 0.25, 0))
-    local leftHipPos = jointWorldPos(torso, "Left Hip", Vector3.new(-torso.Size.X * 0.25, -torso.Size.Y * 0.5, 0))
-    local rightHipPos = jointWorldPos(torso, "Right Hip", Vector3.new(torso.Size.X * 0.25, -torso.Size.Y * 0.5, 0))
-
-    local leftArmEnd = worldPoint(leftArm, Vector3.new(0, -leftArm.Size.Y * 0.5, 0))
-    local rightArmEnd = worldPoint(rightArm, Vector3.new(0, -rightArm.Size.Y * 0.5, 0))
-    local leftLegEnd = worldPoint(leftLeg, Vector3.new(0, -leftLeg.Size.Y * 0.5, 0))
-    local rightLegEnd = worldPoint(rightLeg, Vector3.new(0, -rightLeg.Size.Y * 0.5, 0))
-
-    if not (neckPos and leftShoulderPos and rightShoulderPos and leftHipPos and rightHipPos) then
-        for _, ln in ipairs(d.skeletonLines or {}) do
-            if ln then ln.Visible = false end
-        end
-        return
-    end
-
-    local shoulderCenter = (leftShoulderPos + rightShoulderPos) * 0.5
-    local hipCenter = (leftHipPos + rightHipPos) * 0.5
-    local r6Segments = {
-        {headTop, neckPos},
-        {neckPos, shoulderCenter},
-        {shoulderCenter, hipCenter},
-        {leftShoulderPos, rightShoulderPos},
-        {leftShoulderPos, leftArmEnd},
-        {rightShoulderPos, rightArmEnd},
-        {leftHipPos, leftLegEnd},
-        {rightHipPos, rightLegEnd},
-    }
-
-    local lines = d.skeletonLines
-    local color = Color3.fromRGB(255, 255, 255)
-    for i, ln in ipairs(lines) do
-        local seg = r6Segments[i]
-        if not ln or not seg or not seg[1] or not seg[2] then
-            if ln then ln.Visible = false end
-        else
-            local s1, on1 = Camera:WorldToViewportPoint(seg[1])
-            local s2, on2 = Camera:WorldToViewportPoint(seg[2])
-            if (on1 or on2) and s1.Z > 0 and s2.Z > 0 then
-                setSkeletonLine2D(ln, Vector2.new(s1.X, s1.Y), Vector2.new(s2.X, s2.Y), 2, color)
-            else
-                ln.Visible = false
-            end
-        end
-    end
 end
 
 local function hideAll(d)
@@ -430,15 +354,15 @@ RunService.Heartbeat:Connect(function()
 
             -- SKELETON
             if Config.SkeletonEnabled then
-                local wantedMode = humanoid.RigType == Enum.HumanoidRigType.R6 and "R6" or "R15"
+                local wantedMode = humanoid.RigType == Enum.HumanoidRigType.R6 and "R6_DISABLED" or "R15"
                 if #d.skeletonLines == 0 or d.skeletonMode ~= wantedMode then
                     buildSkeleton(plr)
                 end
 
-                if d.skeletonMode == "R6" then
-                    pcall(function()
-                        updateR6Skeleton(d, char)
-                    end)
+                if d.skeletonMode == "R6_DISABLED" then
+                    for _, ln in ipairs(d.skeletonLines or {}) do
+                        pcall(function() ln.Visible = false end)
+                    end
                 else
                     for i, seg in ipairs(d.skeletonSegments) do
                         local ln = d.skeletonLines[i]

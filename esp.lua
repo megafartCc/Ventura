@@ -4,6 +4,32 @@ local camera = game:GetService("Workspace").CurrentCamera
 local player = Players.LocalPlayer
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
+-- Random name generator — makes UI instances look like native Roblox UI
+local _rngSeed = tick()
+local function _rname()
+    local chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    local len = math.random(6, 14)
+    local s = ""
+    for i = 1, len do
+        _rngSeed = (_rngSeed * 1664525 + 1013904223) % (2^32)
+        local idx = (_rngSeed % #chars) + 1
+        s = s .. chars:sub(idx, idx)
+    end
+    return s
+end
+
+-- Persistent gethui root (retrieved once, cached)
+local _huiRoot = nil
+local function getHUI()
+    if _huiRoot then return _huiRoot end
+    local ok, r = pcall(function() return gethui and gethui() end)
+    if ok and r then
+        _huiRoot = r
+        return r
+    end
+    return nil  -- never fall back to CoreGui
+end
+
 local THEME = {
     panel = Color3.fromRGB(16, 18, 24),
     panel2 = Color3.fromRGB(22, 24, 30),
@@ -158,13 +184,7 @@ local function releaseBuffs()
 end
 
 local function getHudRoot()
-    local ok, ui = pcall(function()
-        return gethui and gethui()
-    end)
-    if ok and ui then
-        return ui
-    end
-    return (gethui and gethui() or game:GetService("CoreGui"))
+    return getHUI()  -- gethui() only, never CoreGui
 end
 
 local function safeDisconnectConn(conn)
@@ -175,15 +195,17 @@ local function safeDisconnectConn(conn)
     end
 end
 
+local _fallbackGui = nil
 local function getFallbackGui()
-    local core = gethui and gethui() or game:GetService("CoreGui")
-    local gui = core:FindFirstChild("ESPFallbackGui")
-    if not gui then
-        gui = Instance.new("ScreenGui")
-        gui.Name = "ESPFallbackGui"
-        gui.ResetOnSpawn = false
-        gui.Parent = core
-    end
+    local hui = getHUI()
+    if not hui then return nil end  -- gethui unavailable — skip drawing entirely
+    if _fallbackGui and _fallbackGui.Parent then return _fallbackGui end
+    local gui = Instance.new("ScreenGui")
+    gui.Name = _rname()  -- random innocent-looking name
+    gui.ResetOnSpawn = false
+    gui.IgnoreGuiInset = true
+    gui.Parent = hui
+    _fallbackGui = gui
     return gui
 end
 
@@ -205,11 +227,19 @@ local function NewQuad(thickness, color)
     end
     -- Fallback for Box ESP (4 lines instead of 1 quad, or 1 Frame)
     local f = Instance.new("Frame")
-    f.BackgroundTransparency = 1
+    f.Name = _rname()
     f.BorderSizePixel = thickness
     f.BorderColor3 = color
+    f.BackgroundTransparency = 1
     f.Visible = false
-    f.Parent = getFallbackGui()
+    local fg = getFallbackGui()
+    if not fg then
+        -- gethui unavailable, return a no-op dummy
+        local dummy = { Visible=false, PointA=Vector2.new(0,0), PointB=Vector2.new(0,0), PointC=Vector2.new(0,0), PointD=Vector2.new(0,0), Color=color, Filled=false, Thickness=thickness, Transparency=1 }
+        function dummy:Remove() end
+        return dummy
+    end
+    f.Parent = fg
     
     local quad = {
         Visible = false,
@@ -262,11 +292,18 @@ local function NewLine(thickness, color)
     end
 
     local f = Instance.new("Frame")
+    f.Name = _rname()
     f.BorderSizePixel = 0
     f.BackgroundColor3 = color
     f.Visible = false
     f.AnchorPoint = Vector2.new(0.5, 0.5)
-    f.Parent = getFallbackGui()
+    local fg = getFallbackGui()
+    if not fg then
+        local dummy = { Visible=false, From=Vector2.new(0,0), To=Vector2.new(0,0), Color=color, Thickness=thickness, Transparency=1 }
+        function dummy:Remove() end
+        return dummy
+    end
+    f.Parent = fg
 
     local line = {
         Visible = false,
@@ -314,13 +351,20 @@ local function NewText(size, color)
     end
 
     local f = Instance.new("TextLabel")
+    f.Name = _rname()
     f.BackgroundTransparency = 1
     f.TextColor3 = color
     f.TextStrokeTransparency = 0
     f.TextSize = size
     f.Font = Enum.Font.Code
     f.Visible = false
-    f.Parent = getFallbackGui()
+    local fg = getFallbackGui()
+    if not fg then
+        local dummy = { Visible=false, Center=true, Outline=true, Size=size, Color=color, Text="", Position=Vector2.new(0,0) }
+        function dummy:Remove() end
+        return dummy
+    end
+    f.Parent = fg
 
     local txt = {
         Visible = false,

@@ -175,6 +175,18 @@ local function safeDisconnectConn(conn)
     end
 end
 
+local function getFallbackGui()
+    local core = gethui and gethui() or game:GetService("CoreGui")
+    local gui = core:FindFirstChild("ESPFallbackGui")
+    if not gui then
+        gui = Instance.new("ScreenGui")
+        gui.Name = "ESPFallbackGui"
+        gui.ResetOnSpawn = false
+        gui.Parent = core
+    end
+    return gui
+end
+
 local function NewQuad(thickness, color)
     if hasDrawing then
         local success, quad = pcall(function() return Drawing.new("Quad") end)
@@ -191,6 +203,14 @@ local function NewQuad(thickness, color)
             return quad
         end
     end
+    -- Fallback for Box ESP (4 lines instead of 1 quad, or 1 Frame)
+    local f = Instance.new("Frame")
+    f.BackgroundTransparency = 1
+    f.BorderSizePixel = thickness
+    f.BorderColor3 = color
+    f.Visible = false
+    f.Parent = getFallbackGui()
+    
     local quad = {
         Visible = false,
         PointA = Vector2.new(0, 0),
@@ -201,8 +221,29 @@ local function NewQuad(thickness, color)
         Filled = false,
         Thickness = thickness,
         Transparency = 1,
+        _frame = f
     }
-    function quad:Remove() end
+    
+    -- The quad needs a metatable to update the Frame when properties change
+    setmetatable(quad, {
+        __newindex = function(t, k, v)
+            rawset(t, k, v)
+            if k == "Visible" then t._frame.Visible = v
+            elseif k == "Color" then t._frame.BorderColor3 = v
+            elseif k == "PointA" or k == "PointD" then
+                if t.PointA and t.PointD then
+                    local minX = math.min(t.PointA.X, t.PointD.X)
+                    local minY = math.min(t.PointA.Y, t.PointD.Y)
+                    local maxX = math.max(t.PointA.X, t.PointD.X)
+                    local maxY = math.max(t.PointA.Y, t.PointD.Y)
+                    t._frame.Position = UDim2.fromOffset(minX, minY)
+                    t._frame.Size = UDim2.fromOffset(maxX - minX, maxY - minY)
+                end
+            end
+        end
+    })
+    
+    function quad:Remove() self._frame:Destroy() end
     return quad
 end
 
@@ -220,6 +261,13 @@ local function NewLine(thickness, color)
         end
     end
 
+    local f = Instance.new("Frame")
+    f.BorderSizePixel = 0
+    f.BackgroundColor3 = color
+    f.Visible = false
+    f.AnchorPoint = Vector2.new(0.5, 0.5)
+    f.Parent = getFallbackGui()
+
     local line = {
         Visible = false,
         From = Vector2.new(0, 0),
@@ -227,9 +275,87 @@ local function NewLine(thickness, color)
         Color = color,
         Thickness = thickness,
         Transparency = 1,
+        _frame = f
     }
-    function line:Remove() end
+    
+    setmetatable(line, {
+        __newindex = function(t, k, v)
+            rawset(t, k, v)
+            if k == "Visible" then t._frame.Visible = v
+            elseif k == "Color" then t._frame.BackgroundColor3 = v
+            elseif k == "From" or k == "To" then
+                if t.From and t.To then
+                    local dist = (t.To - t.From).Magnitude
+                    local center = (t.From + t.To) / 2
+                    local angle = math.atan2(t.To.Y - t.From.Y, t.To.X - t.From.X)
+                    t._frame.Position = UDim2.fromOffset(center.X, center.Y)
+                    t._frame.Size = UDim2.fromOffset(dist, t.Thickness)
+                    t._frame.Rotation = math.deg(angle)
+                end
+            end
+        end
+    })
+    
+    function line:Remove() self._frame:Destroy() end
     return line
+end
+
+local function NewText(size, color)
+    if hasDrawing then
+        local success, txt = pcall(function() return Drawing.new("Text") end)
+        if success and txt then
+            txt.Visible = false
+            txt.Center = true
+            txt.Outline = true
+            txt.Size = size
+            txt.Color = color
+            return txt
+        end
+    end
+
+    local f = Instance.new("TextLabel")
+    f.BackgroundTransparency = 1
+    f.TextColor3 = color
+    f.TextStrokeTransparency = 0
+    f.TextSize = size
+    f.Font = Enum.Font.Code
+    f.Visible = false
+    f.Parent = getFallbackGui()
+
+    local txt = {
+        Visible = false,
+        Center = true,
+        Outline = true,
+        Size = size,
+        Color = color,
+        Text = "",
+        Position = Vector2.new(0, 0),
+        _label = f
+    }
+    
+    setmetatable(txt, {
+        __newindex = function(t, k, v)
+            rawset(t, k, v)
+            if k == "Visible" then t._label.Visible = v
+            elseif k == "Color" then t._label.TextColor3 = v
+            elseif k == "Text" then t._label.Text = v
+            elseif k == "Size" then t._label.TextSize = v
+            elseif k == "Position" then
+                if t.Position then
+                    t._label.Position = UDim2.fromOffset(t.Position.X, t.Position.Y)
+                end
+            elseif k == "Center" then
+                if v then
+                    t._label.AnchorPoint = Vector2.new(0.5, 0.5)
+                else
+                    t._label.AnchorPoint = Vector2.new(0, 0)
+                end
+            end
+        end
+    })
+    
+    function txt:Remove() self._label:Destroy() end
+    return txt
 end
 
 local function ESP(plr)
@@ -416,15 +542,8 @@ local function ESP(plr)
 
                         if nameEspEnabled then
                             if not library.nametext then
-                                if hasDrawing then
-                                    local t = Drawing.new("Text")
-                                    t.Visible = false
-                                    t.Center = true
-                                    t.Outline = true
-                                    t.Size = nameSize
-                                    t.Color = Color3.fromRGB(255, 255, 255)
-                                    library.nametext = t
-                                end
+                                local t = NewText(nameSize, Color3.fromRGB(255, 255, 255))
+                                library.nametext = t
                             end
                             if library.nametext then
                                 local t = library.nametext
@@ -509,15 +628,8 @@ local function ESP(plr)
                         
                         if hotbarEspEnabled and hotbarDisplaySet.Text then
                             if not library.hotbartext then
-                                if hasDrawing then
-                                    local ht = Drawing.new("Text")
-                                    ht.Visible = false
-                                    ht.Center = true
-                                    ht.Outline = true
-                                    ht.Size = hotbarSize
-                                    ht.Color = Color3.fromRGB(200, 200, 200)
-                                    library.hotbartext = ht
-                                end
+                                local ht = NewText(hotbarSize, Color3.fromRGB(200, 200, 200))
+                                library.hotbartext = ht
                             end
                             if library.hotbartext then
                                 local ht = library.hotbartext
@@ -558,15 +670,9 @@ local function ESP(plr)
                         
                         if teamLabel and teamCheckEnabled then
                             if not library.teamtext then
-                                if hasDrawing then
-                                    local tt = Drawing.new("Text")
-                                    tt.Visible = false
-                                    tt.Center = false
-                                    tt.Outline = true
-                                    tt.Size = teamSize
-                                    tt.Color = (teamColorEnabled and teamObj and teamObj.TeamColor.Color) or Color3.fromRGB(255, 255, 255)
-                                    library.teamtext = tt
-                                end
+                                local tt = NewText(teamSize, (teamColorEnabled and teamObj and teamObj.TeamColor.Color) or Color3.fromRGB(255, 255, 255))
+                                tt.Center = false
+                                library.teamtext = tt
                             end
                             if library.teamtext then
                                 local tt = library.teamtext
@@ -635,28 +741,7 @@ local function DrawSkeletonESP(plr)
     end
 
     local function DrawLine()
-        if hasDrawing then
-            local success, l = pcall(function() return Drawing.new("Line") end)
-            if success and l then
-                l.Visible = false
-                l.From = Vector2.new(0, 0)
-                l.To = Vector2.new(1, 1)
-                l.Color = Color3.fromRGB(255, 255, 255)
-                l.Thickness = 1
-                l.Transparency = 1
-                return l
-            end
-        end
-        local l = {
-            Visible = false,
-            From = Vector2.new(0, 0),
-            To = Vector2.new(0, 0),
-            Color = Color3.fromRGB(255, 255, 255),
-            Thickness = 1,
-            Transparency = 1,
-        }
-        function l:Remove() end
-        return l
+        return NewLine(1, Color3.fromRGB(255, 255, 255))
     end
     
     repeat task.wait() until plr.Character ~= nil and plr.Character:FindFirstChild("Humanoid") ~= nil

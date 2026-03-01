@@ -67,9 +67,9 @@ local function createPlayerDrawings(plr)
         d.healthFill.Visible = false
         d.healthFill.Thickness = 2
 
-        -- Skeleton lines + part refs
+        -- Skeleton lines + segment refs
         d.skeletonLines = {}
-        d.skeletonParts = {}
+        d.skeletonSegments = {}
     end)
 
     tracked[plr] = d
@@ -89,6 +89,31 @@ local function destroyPlayerDrawings(plr)
     tracked[plr] = nil
 end
 
+local function addSkeletonSegment(d, partA, partB, offsetA, offsetB)
+    if not d or not partA or not partB then return end
+
+    local ln = Drawing.new("Line")
+    ln.Visible = false
+    ln.Color = Color3.fromRGB(255, 255, 255)
+    ln.Thickness = 2
+
+    table.insert(d.skeletonLines, ln)
+    table.insert(d.skeletonSegments, {
+        a = partA,
+        b = partB,
+        aOffset = offsetA,
+        bOffset = offsetB,
+    })
+end
+
+local function segmentWorldPoint(part, offset)
+    if not part or not part.Parent then return nil end
+    if offset then
+        return part.CFrame:PointToWorldSpace(offset)
+    end
+    return part.Position
+end
+
 local function buildSkeleton(plr)
     local d = tracked[plr]
     if not d then return end
@@ -98,7 +123,7 @@ local function buildSkeleton(plr)
         end
     end)
     d.skeletonLines = {}
-    d.skeletonParts = {}
+    d.skeletonSegments = {}
 
     local char = plr.Character
     if not char then return end
@@ -116,44 +141,67 @@ local function buildSkeleton(plr)
         local leftFoot = char:FindFirstChild("LeftFoot") or char:FindFirstChild("LeftLowerLeg")
         local rightFoot = char:FindFirstChild("RightFoot") or char:FindFirstChild("RightLowerLeg")
 
-        local pairs_ = {}
         if lowerTorso then
             -- R15
-            if head and torso then table.insert(pairs_, {head, torso}) end
-            if torso and lowerTorso then table.insert(pairs_, {torso, lowerTorso}) end
-            if torso and leftArm then table.insert(pairs_, {torso, leftArm}) end
-            if leftArm and leftHand then table.insert(pairs_, {leftArm, leftHand}) end
-            if torso and rightArm then table.insert(pairs_, {torso, rightArm}) end
-            if rightArm and rightHand then table.insert(pairs_, {rightArm, rightHand}) end
-            if lowerTorso and leftLeg then table.insert(pairs_, {lowerTorso, leftLeg}) end
-            if leftLeg and leftFoot then table.insert(pairs_, {leftLeg, leftFoot}) end
-            if lowerTorso and rightLeg then table.insert(pairs_, {lowerTorso, rightLeg}) end
-            if rightLeg and rightFoot then table.insert(pairs_, {rightLeg, rightFoot}) end
+            if head and torso then addSkeletonSegment(d, head, torso) end
+            if torso and lowerTorso then addSkeletonSegment(d, torso, lowerTorso) end
+            if torso and leftArm then addSkeletonSegment(d, torso, leftArm) end
+            if leftArm and leftHand then addSkeletonSegment(d, leftArm, leftHand) end
+            if torso and rightArm then addSkeletonSegment(d, torso, rightArm) end
+            if rightArm and rightHand then addSkeletonSegment(d, rightArm, rightHand) end
+            if lowerTorso and leftLeg then addSkeletonSegment(d, lowerTorso, leftLeg) end
+            if leftLeg and leftFoot then addSkeletonSegment(d, leftLeg, leftFoot) end
+            if lowerTorso and rightLeg then addSkeletonSegment(d, lowerTorso, rightLeg) end
+            if rightLeg and rightFoot then addSkeletonSegment(d, rightLeg, rightFoot) end
         else
             -- R6
-            -- Spine
-            if head and torso then table.insert(pairs_, {head, torso}) end
-            
-            -- Arms (connect Torso to Arms)
-            if torso and leftArm then table.insert(pairs_, {torso, leftArm}) end
-            if torso and rightArm then table.insert(pairs_, {torso, rightArm}) end
-            
-            -- Legs (connect Torso to Legs)
-            if torso and leftLeg then table.insert(pairs_, {torso, leftLeg}) end
-            if torso and rightLeg then table.insert(pairs_, {torso, rightLeg}) end
-            
-            -- Optional: Shoulders and Hips crossbars to make it look like a body instead of a stick
-            if leftArm and rightArm then table.insert(pairs_, {leftArm, rightArm}) end
-            if leftLeg and rightLeg then table.insert(pairs_, {leftLeg, rightLeg}) end
-        end
+            if torso then
+                local neckOffset = Vector3.new(0, torso.Size.Y * 0.5, 0)
+                local hipCenterOffset = Vector3.new(0, -torso.Size.Y * 0.45, 0)
 
-        for _, pair in ipairs(pairs_) do
-            local ln = Drawing.new("Line")
-            ln.Visible = false
-            ln.Color = Color3.fromRGB(255, 255, 255)
-            ln.Thickness = 2
-            table.insert(d.skeletonLines, ln)
-            table.insert(d.skeletonParts, pair)
+                if head then
+                    local headBottomOffset = Vector3.new(0, -head.Size.Y * 0.5, 0)
+                    addSkeletonSegment(d, head, torso, headBottomOffset, neckOffset)
+                end
+
+                -- Vertical torso line (neck to hips), no center-star triangles.
+                addSkeletonSegment(d, torso, torso, neckOffset, hipCenterOffset)
+
+                if leftArm then
+                    local leftShoulderOffset = Vector3.new(-torso.Size.X * 0.5, torso.Size.Y * 0.25, 0)
+                    local leftArmTop = Vector3.new(0, leftArm.Size.Y * 0.5, 0)
+                    local leftArmBottom = Vector3.new(0, -leftArm.Size.Y * 0.5, 0)
+                    addSkeletonSegment(d, torso, leftArm, leftShoulderOffset, leftArmTop)
+                    addSkeletonSegment(d, leftArm, leftArm, leftArmTop, leftArmBottom)
+                end
+
+                if rightArm then
+                    local rightShoulderOffset = Vector3.new(torso.Size.X * 0.5, torso.Size.Y * 0.25, 0)
+                    local rightArmTop = Vector3.new(0, rightArm.Size.Y * 0.5, 0)
+                    local rightArmBottom = Vector3.new(0, -rightArm.Size.Y * 0.5, 0)
+                    addSkeletonSegment(d, torso, rightArm, rightShoulderOffset, rightArmTop)
+                    addSkeletonSegment(d, rightArm, rightArm, rightArmTop, rightArmBottom)
+                end
+
+                if leftLeg then
+                    local leftHipOffset = Vector3.new(-torso.Size.X * 0.25, -torso.Size.Y * 0.45, 0)
+                    local leftLegTop = Vector3.new(0, leftLeg.Size.Y * 0.5, 0)
+                    local leftLegBottom = Vector3.new(0, -leftLeg.Size.Y * 0.5, 0)
+                    addSkeletonSegment(d, torso, leftLeg, leftHipOffset, leftLegTop)
+                    addSkeletonSegment(d, leftLeg, leftLeg, leftLegTop, leftLegBottom)
+                end
+
+                if rightLeg then
+                    local rightHipOffset = Vector3.new(torso.Size.X * 0.25, -torso.Size.Y * 0.45, 0)
+                    local rightLegTop = Vector3.new(0, rightLeg.Size.Y * 0.5, 0)
+                    local rightLegBottom = Vector3.new(0, -rightLeg.Size.Y * 0.5, 0)
+                    addSkeletonSegment(d, torso, rightLeg, rightHipOffset, rightLegTop)
+                    addSkeletonSegment(d, rightLeg, rightLeg, rightLegTop, rightLegBottom)
+                end
+            elseif head then
+                -- Fallback: still draw something if torso is missing.
+                addSkeletonSegment(d, head, head, Vector3.new(0, -head.Size.Y * 0.5, 0), Vector3.new(0, head.Size.Y * 0.5, 0))
+            end
         end
     end)
 end
@@ -273,15 +321,22 @@ RunService.Heartbeat:Connect(function()
 
             -- SKELETON
             if Config.SkeletonEnabled then
-                if #d.skeletonParts == 0 then
+                if #d.skeletonSegments == 0 then
                     buildSkeleton(plr)
                 end
-                for i, pair in ipairs(d.skeletonParts) do
+                for i, seg in ipairs(d.skeletonSegments) do
                     local ln = d.skeletonLines[i]
                     pcall(function()
-                        if pair[1] and pair[2] and pair[1].Parent and pair[2].Parent and ln then
-                            local s1, on1 = Camera:WorldToViewportPoint(pair[1].Position)
-                            local s2, on2 = Camera:WorldToViewportPoint(pair[2].Position)
+                        if ln and seg and seg.a and seg.b and seg.a.Parent and seg.b.Parent then
+                            local p1 = segmentWorldPoint(seg.a, seg.aOffset)
+                            local p2 = segmentWorldPoint(seg.b, seg.bOffset)
+                            if not p1 or not p2 then
+                                ln.Visible = false
+                                return
+                            end
+
+                            local s1, on1 = Camera:WorldToViewportPoint(p1)
+                            local s2, on2 = Camera:WorldToViewportPoint(p2)
                             if (on1 or on2) and s1.Z > 0 and s2.Z > 0 then
                                 ln.From = Vector2.new(s1.X, s1.Y)
                                 ln.To = Vector2.new(s2.X, s2.Y)

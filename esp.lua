@@ -218,13 +218,16 @@ local function buildSkeleton(plr)
         local rightFoot = char:FindFirstChild("RightFoot") or char:FindFirstChild("RightLowerLeg")
 
         if humanoid.RigType == Enum.HumanoidRigType.R6 then
-            d.skeletonMode = "R6_DISABLED"
+            d.skeletonMode = "R6"
+            for i = 1, 8 do
+                local ln = createSkeletonLine()
+                table.insert(d.skeletonLines, ln)
+            end
             return
         end
 
         if lowerTorso then
             d.skeletonMode = "R15"
-            -- R15
             if head and torso then addSkeletonSegment(d, head, torso) end
             if torso and lowerTorso then addSkeletonSegment(d, torso, lowerTorso) end
             if torso and leftArm then addSkeletonSegment(d, torso, leftArm) end
@@ -354,15 +357,61 @@ RunService.Heartbeat:Connect(function()
 
             -- SKELETON
             if Config.SkeletonEnabled then
-                local wantedMode = humanoid.RigType == Enum.HumanoidRigType.R6 and "R6_DISABLED" or "R15"
+                local wantedMode = humanoid.RigType == Enum.HumanoidRigType.R6 and "R6" or "R15"
                 if #d.skeletonLines == 0 or d.skeletonMode ~= wantedMode then
                     buildSkeleton(plr)
                 end
 
-                if d.skeletonMode == "R6_DISABLED" then
-                    for _, ln in ipairs(d.skeletonLines or {}) do
-                        pcall(function() ln.Visible = false end)
-                    end
+                if d.skeletonMode == "R6" then
+                    pcall(function()
+                        local head = char:FindFirstChild("Head")
+                        local torso = char:FindFirstChild("Torso")
+                        local lArm = char:FindFirstChild("Left Arm")
+                        local rArm = char:FindFirstChild("Right Arm")
+                        local lLeg = char:FindFirstChild("Left Leg")
+                        local rLeg = char:FindFirstChild("Right Leg")
+                        if not head or not torso then
+                            for _, ln in ipairs(d.skeletonLines) do ln.Visible = false end
+                            return
+                        end
+
+                        local tc = torso.CFrame
+                        local neck = (tc * CFrame.new(0, 1, 0)).Position
+                        local pelvis = (tc * CFrame.new(0, -1, 0)).Position
+                        local lS = (tc * CFrame.new(-1.5, 1, 0)).Position
+                        local rS = (tc * CFrame.new(1.5, 1, 0)).Position
+                        local lH = (tc * CFrame.new(-0.5, -1, 0)).Position
+                        local rH = (tc * CFrame.new(0.5, -1, 0)).Position
+                        local lHand = lArm and (lArm.CFrame * CFrame.new(0, -1, 0)).Position or lS
+                        local rHand = rArm and (rArm.CFrame * CFrame.new(0, -1, 0)).Position or rS
+                        local lFoot = lLeg and (lLeg.CFrame * CFrame.new(0, -1, 0)).Position or lH
+                        local rFoot = rLeg and (rLeg.CFrame * CFrame.new(0, -1, 0)).Position or rH
+
+                        local joints = {
+                            {head.Position, neck},
+                            {lS, rS},
+                            {lS, lHand},
+                            {rS, rHand},
+                            {neck, pelvis},
+                            {lH, rH},
+                            {lH, lFoot},
+                            {rH, rFoot},
+                        }
+                        for i, pair in ipairs(joints) do
+                            local ln = d.skeletonLines[i]
+                            if ln then
+                                local s1, on1 = Camera:WorldToViewportPoint(pair[1])
+                                local s2, on2 = Camera:WorldToViewportPoint(pair[2])
+                                if (on1 or on2) and s1.Z > 0 and s2.Z > 0 then
+                                    ln.From = Vector2.new(s1.X, s1.Y)
+                                    ln.To = Vector2.new(s2.X, s2.Y)
+                                    ln.Visible = true
+                                else
+                                    ln.Visible = false
+                                end
+                            end
+                        end
+                    end)
                 else
                     for i, seg in ipairs(d.skeletonSegments) do
                         local ln = d.skeletonLines[i]

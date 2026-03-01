@@ -24,80 +24,65 @@ M.AdminTeamEnabled = true
 M.AdminListEnabled = false
 M.AdminListOffset = Vector2.new(0,0)
 local ADMIN_GROUP_ID = 17180419
-local ADMIN_ROLES = {
-    ["Moderator"] = true,
-    ["Administrator"] = true,
-    ["Collaborators"] = true,
-    ["Team Member"] = true,
-    ["Developer"] = true,
-    ["Operations Manager"] = true,
-    ["Founder & CEO"] = true,
-    ["Root"] = true,
-}
 
 local tracked = {}
-local adminCache = {}
-local adminCacheTime = {}
-local CACHE_TTL = 30
 
 local function w2s(p)
     local v, on = Camera:WorldToViewportPoint(p)
     return V2(v.X, v.Y), on, v.Z
 end
 
--- Raw admin check (no toggle guard) — used by scanner
-local function checkAdmin(plr)
-    if adminCache[plr] ~= nil and adminCacheTime[plr] and (tick() - adminCacheTime[plr]) < CACHE_TTL then
-        return adminCache[plr]
+-- Try to get the game's own Permissions module
+local GamePerms = nil
+pcall(function()
+    local permsModule = game:GetService("ReplicatedStorage"):FindFirstChild("Permissions")
+    if permsModule then
+        GamePerms = require(permsModule)
     end
-    local ok, role = pcall(function()
-        return plr:GetRoleInGroup(ADMIN_GROUP_ID)
+end)
+
+-- Admin check: tries game module first, then IsInGroup+rank, then role name
+local function checkAdmin(plr)
+    -- Method 1: Game's own IsDeveloper (most accurate)
+    if GamePerms and GamePerms.IsDeveloper then
+        local ok, result = pcall(GamePerms.IsDeveloper, plr)
+        if ok then return result == true end
+    end
+    -- Method 2: IsInGroup + GetRankInGroup (same logic as game)
+    local ok, result = pcall(function()
+        return plr:IsInGroup(ADMIN_GROUP_ID) and plr:GetRankInGroup(ADMIN_GROUP_ID) >= 252
     end)
-    local isAdm = ok and role and ADMIN_ROLES[role] == true
-    adminCache[plr] = isAdm
-    adminCacheTime[plr] = tick()
-    return isAdm
+    if ok then return result == true end
+    return false
 end
 
--- Guarded admin check — used by ESP rendering (only highlights when toggle is on)
+-- Guarded version for ESP rendering (only highlights when Admin ESP toggle is on)
 local function isAdmin(plr)
     if not M.AdminEnabled then return false end
     return checkAdmin(plr)
 end
 
--- Background admin scan (uses checkAdmin, works regardless of toggles)
+-- Admin list: scans ALL players, cached, updated on join/leave
 local cachedAdminCount = 0
-local cachedAdminNames = {}
-local adminScanRunning = false
+local adminListConns = {}
 
-local function runAdminScan()
-    if adminScanRunning then return end
-    adminScanRunning = true
-    task.spawn(function()
-        while M.AdminEnabled or M.AdminListEnabled do
-            local count = 0
-            local names = {}
-            if M.AdminCount and M.AdminCount > 0 and M.AdminNames then
-                count = M.AdminCount
-                names = M.AdminNames
-            else
-                for _, plr in ipairs(Players:GetPlayers()) do
-                    if plr ~= LP then
-                        pcall(function()
-                            if checkAdmin(plr) then
-                                count = count + 1
-                                table.insert(names, plr.DisplayName or plr.Name)
-                            end
-                        end)
-                    end
+local function refreshAdminList()
+    local count = 0
+    -- If external ventura.lua already set count, use it
+    if M.AdminCount and M.AdminCount > 0 then
+        cachedAdminCount = M.AdminCount
+        return
+    end
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= LP then
+            pcall(function()
+                if checkAdmin(plr) then
+                    count = count + 1
                 end
-            end
-            cachedAdminCount = count
-            cachedAdminNames = names
-            task.wait(10)
+            end)
         end
-        adminScanRunning = false
-    end)
+    end
+    cachedAdminCount = count
 end
 
 local function alive(p)
@@ -445,7 +430,7 @@ RunService.Heartbeat:Connect(function()
             adminLabel.Center = false
             adminLabel.Outline = true
             adminLabel.Color = C3(255,0,0)
-            runAdminScan() -- start background scan when label first shown
+            refreshAdminList() -- scan immediately
         end
         local vp = Camera and Camera.ViewportSize or Vector2.new(1920,1080)
         adminLabel.Position = Vector2.new(vp.X - 160, 10) + M.AdminListOffset
@@ -468,8 +453,14 @@ local function onPlr(plr)
 end
 
 for _, p in ipairs(Players:GetPlayers()) do pcall(onPlr, p) end
-Players.PlayerAdded:Connect(function(p) pcall(onPlr, p) end)
-Players.PlayerRemoving:Connect(function(p) pcall(nuke, p) end)
+Players.PlayerAdded:Connect(function(p)
+    pcall(onPlr, p)
+    task.delay(1, function() pcall(refreshAdminList) end) -- re-scan when someone joins
+end)
+Players.PlayerRemoving:Connect(function(p)
+    pcall(nuke, p)
+    task.delay(0.5, function() pcall(refreshAdminList) end) -- re-scan when someone leaves
+end)
 
 local API = {}
 function API:Init() end
@@ -478,13 +469,13 @@ function API:SetNameEsp(s) M.NameEnabled = s end
 function API:SetHealthEsp(s) M.HealthEnabled = s end
 function API:SetTracers(s) M.TracersEnabled = s end
 function API:SetTeamEsp(s) M.TeamEnabled = s end
-function API:SetAdminEsp(s) M.AdminEnabled = s; if s then runAdminScan() end end
+function API:SetAdminEsp(s) M.AdminEnabled = s; if s then task.spawn(refreshAdminList) end end
 function API:SetAdminBoxes(s) M.AdminBoxEnabled = s end
 function API:SetAdminNames(s) M.AdminNameEnabled = s end
 function API:SetAdminTracers(s) M.AdminTracersEnabled = s end
 function API:SetAdminSkeleton(s) M.AdminSkeletonEnabled = s end
 function API:SetAdminTeamEsp(s) M.AdminTeamEnabled = s end
-function API:SetAdminList(s) M.AdminListEnabled = s; if s then runAdminScan() end end
+function API:SetAdminList(s) M.AdminListEnabled = s; if s then task.spawn(refreshAdminList) end end
 function API:SetSkeletonEsp(s)
     M.SkeletonEnabled = s
     if s then

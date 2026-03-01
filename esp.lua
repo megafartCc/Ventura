@@ -39,6 +39,14 @@ local mouse = player:GetMouse()
 
 local hasDrawing = (typeof(Drawing) == "table" or typeof(Drawing) == "userdata")
     and typeof(Drawing.new) == "function"
+if hasDrawing then
+    local success, obj = pcall(function() return Drawing.new("Line") end)
+    if not success or not obj then
+        hasDrawing = false
+    else
+        pcall(function() obj:Remove() end)
+    end
+end
 local hasTaskCancel = (type(task) == "table" or type(task) == "userdata")
     and type(task.cancel) == "function"
 

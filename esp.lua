@@ -117,16 +117,30 @@ local function buildSkeleton(plr)
         local rightFoot = char:FindFirstChild("RightFoot") or char:FindFirstChild("RightLowerLeg")
 
         local pairs_ = {}
-        if head and torso then table.insert(pairs_, {head, torso}) end
-        if torso and lowerTorso then table.insert(pairs_, {torso, lowerTorso}) end
-        if torso and leftArm then table.insert(pairs_, {torso, leftArm}) end
-        if torso and rightArm then table.insert(pairs_, {torso, rightArm}) end
-        if leftArm and leftHand then table.insert(pairs_, {leftArm, leftHand}) end
-        if rightArm and rightHand then table.insert(pairs_, {rightArm, rightHand}) end
-        if (lowerTorso or torso) and leftLeg then table.insert(pairs_, {lowerTorso or torso, leftLeg}) end
-        if (lowerTorso or torso) and rightLeg then table.insert(pairs_, {lowerTorso or torso, rightLeg}) end
-        if leftLeg and leftFoot then table.insert(pairs_, {leftLeg, leftFoot}) end
-        if rightLeg and rightFoot then table.insert(pairs_, {rightLeg, rightFoot}) end
+        if lowerTorso then
+            -- R15
+            if head and torso then table.insert(pairs_, {head, torso}) end
+            if torso and leftArm then table.insert(pairs_, {torso, leftArm}) end
+            if torso and rightArm then table.insert(pairs_, {torso, rightArm}) end
+            if leftArm and leftHand then table.insert(pairs_, {leftArm, leftHand}) end
+            if rightArm and rightHand then table.insert(pairs_, {rightArm, rightHand}) end
+            if torso and lowerTorso then table.insert(pairs_, {torso, lowerTorso}) end
+            if lowerTorso and leftLeg then table.insert(pairs_, {lowerTorso, leftLeg}) end
+            if lowerTorso and rightLeg then table.insert(pairs_, {lowerTorso, rightLeg}) end
+            if leftLeg and leftFoot then table.insert(pairs_, {leftLeg, leftFoot}) end
+            if rightLeg and rightFoot then table.insert(pairs_, {rightLeg, rightFoot}) end
+        else
+            -- R6
+            if head and torso then table.insert(pairs_, {head, torso}) end
+            if torso and leftArm then table.insert(pairs_, {torso, leftArm}) end
+            if torso and rightArm then table.insert(pairs_, {torso, rightArm}) end
+            if torso and leftLeg then table.insert(pairs_, {torso, leftLeg}) end
+            if torso and rightLeg then table.insert(pairs_, {torso, rightLeg}) end
+            
+            -- Crossbars for shoulders and hips
+            if leftArm and rightArm then table.insert(pairs_, {leftArm, rightArm}) end
+            if leftLeg and rightLeg then table.insert(pairs_, {leftLeg, rightLeg}) end
+        end
 
         for _, pair in ipairs(pairs_) do
             local ln = Drawing.new("Line")

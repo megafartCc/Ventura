@@ -18,6 +18,73 @@ local Config = {
 }
 
 local tracked = {}
+local SkeletonGui
+
+local function getSkeletonGui()
+    if SkeletonGui and SkeletonGui.Parent then
+        return SkeletonGui
+    end
+
+    local parent
+    pcall(function()
+        if gethui then
+            parent = gethui()
+        end
+    end)
+    if not parent then
+        parent = game:GetService("CoreGui")
+    end
+
+    local gui = Instance.new("ScreenGui")
+    gui.Name = "Ventura_SkeletonESP"
+    gui.ResetOnSpawn = false
+    gui.IgnoreGuiInset = true
+    gui.DisplayOrder = 1000
+    gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    gui.Parent = parent
+    SkeletonGui = gui
+    return gui
+end
+
+local function createSkeletonLine()
+    local ln = Instance.new("Frame")
+    ln.Name = "Bone"
+    ln.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+    ln.BorderSizePixel = 0
+    ln.AnchorPoint = Vector2.new(0.5, 0.5)
+    ln.ZIndex = 1000
+    ln.Visible = false
+    ln.Parent = getSkeletonGui()
+    return ln
+end
+
+local function setSkeletonLine2D(ln, fromPos, toPos, thickness, color)
+    if not ln then return end
+    local delta = toPos - fromPos
+    local length = delta.Magnitude
+    if length < 0.5 then
+        ln.Visible = false
+        return
+    end
+
+    local mid = fromPos + (delta * 0.5)
+    ln.Size = UDim2.fromOffset(math.floor(length + 0.5), thickness or 2)
+    ln.Position = UDim2.fromOffset(mid.X, mid.Y)
+    ln.Rotation = math.deg(math.atan2(delta.Y, delta.X))
+    ln.BackgroundColor3 = color or Color3.fromRGB(255, 255, 255)
+    ln.Visible = true
+end
+
+local function removeSkeletonLine(ln)
+    if not ln then return end
+    pcall(function()
+        if typeof(ln) == "Instance" then
+            ln:Destroy()
+        else
+            ln:Remove()
+        end
+    end)
+end
 
 local function isAlive(p)
     if not p or not p.Character then return false end
@@ -70,6 +137,7 @@ local function createPlayerDrawings(plr)
         -- Skeleton lines + segment refs
         d.skeletonLines = {}
         d.skeletonSegments = {}
+        d.skeletonMode = nil
     end)
 
     tracked[plr] = d
@@ -83,7 +151,7 @@ local function destroyPlayerDrawings(plr)
             if d[k] then d[k]:Remove() end
         end
         for _, ln in ipairs(d.skeletonLines or {}) do
-            if ln then ln:Remove() end
+            removeSkeletonLine(ln)
         end
     end)
     tracked[plr] = nil
@@ -92,10 +160,7 @@ end
 local function addSkeletonSegment(d, partA, partB, offsetA, offsetB)
     if not d or not partA or not partB then return end
 
-    local ln = Drawing.new("Line")
-    ln.Visible = false
-    ln.Color = Color3.fromRGB(255, 255, 255)
-    ln.Thickness = 2
+    local ln = createSkeletonLine()
 
     table.insert(d.skeletonLines, ln)
     table.insert(d.skeletonSegments, {
@@ -119,16 +184,20 @@ local function buildSkeleton(plr)
     if not d then return end
     pcall(function()
         for _, ln in ipairs(d.skeletonLines or {}) do
-            if ln then ln:Remove() end
+            removeSkeletonLine(ln)
         end
     end)
     d.skeletonLines = {}
     d.skeletonSegments = {}
+    d.skeletonMode = nil
 
     local char = plr.Character
     if not char then return end
 
     pcall(function()
+        local humanoid = char:FindFirstChildOfClass("Humanoid")
+        if not humanoid then return end
+
         local head = char:FindFirstChild("Head")
         local torso = char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso")
         local lowerTorso = char:FindFirstChild("LowerTorso")
@@ -141,7 +210,16 @@ local function buildSkeleton(plr)
         local leftFoot = char:FindFirstChild("LeftFoot") or char:FindFirstChild("LeftLowerLeg")
         local rightFoot = char:FindFirstChild("RightFoot") or char:FindFirstChild("RightLowerLeg")
 
+        if humanoid.RigType == Enum.HumanoidRigType.R6 then
+            d.skeletonMode = "R6"
+            for _ = 1, 7 do
+                table.insert(d.skeletonLines, createSkeletonLine())
+            end
+            return
+        end
+
         if lowerTorso then
+            d.skeletonMode = "R15"
             -- R15
             if head and torso then addSkeletonSegment(d, head, torso) end
             if torso and lowerTorso then addSkeletonSegment(d, torso, lowerTorso) end
@@ -153,57 +231,76 @@ local function buildSkeleton(plr)
             if leftLeg and leftFoot then addSkeletonSegment(d, leftLeg, leftFoot) end
             if lowerTorso and rightLeg then addSkeletonSegment(d, lowerTorso, rightLeg) end
             if rightLeg and rightFoot then addSkeletonSegment(d, rightLeg, rightFoot) end
-        else
-            -- R6
-            if torso then
-                local neckOffset = Vector3.new(0, torso.Size.Y * 0.5, 0)
-                local hipCenterOffset = Vector3.new(0, -torso.Size.Y * 0.45, 0)
-
-                if head then
-                    local headBottomOffset = Vector3.new(0, -head.Size.Y * 0.5, 0)
-                    addSkeletonSegment(d, head, torso, headBottomOffset, neckOffset)
-                end
-
-                -- Vertical torso line (neck to hips), no center-star triangles.
-                addSkeletonSegment(d, torso, torso, neckOffset, hipCenterOffset)
-
-                if leftArm then
-                    local leftShoulderOffset = Vector3.new(-torso.Size.X * 0.5, torso.Size.Y * 0.25, 0)
-                    local leftArmTop = Vector3.new(0, leftArm.Size.Y * 0.5, 0)
-                    local leftArmBottom = Vector3.new(0, -leftArm.Size.Y * 0.5, 0)
-                    addSkeletonSegment(d, torso, leftArm, leftShoulderOffset, leftArmTop)
-                    addSkeletonSegment(d, leftArm, leftArm, leftArmTop, leftArmBottom)
-                end
-
-                if rightArm then
-                    local rightShoulderOffset = Vector3.new(torso.Size.X * 0.5, torso.Size.Y * 0.25, 0)
-                    local rightArmTop = Vector3.new(0, rightArm.Size.Y * 0.5, 0)
-                    local rightArmBottom = Vector3.new(0, -rightArm.Size.Y * 0.5, 0)
-                    addSkeletonSegment(d, torso, rightArm, rightShoulderOffset, rightArmTop)
-                    addSkeletonSegment(d, rightArm, rightArm, rightArmTop, rightArmBottom)
-                end
-
-                if leftLeg then
-                    local leftHipOffset = Vector3.new(-torso.Size.X * 0.25, -torso.Size.Y * 0.45, 0)
-                    local leftLegTop = Vector3.new(0, leftLeg.Size.Y * 0.5, 0)
-                    local leftLegBottom = Vector3.new(0, -leftLeg.Size.Y * 0.5, 0)
-                    addSkeletonSegment(d, torso, leftLeg, leftHipOffset, leftLegTop)
-                    addSkeletonSegment(d, leftLeg, leftLeg, leftLegTop, leftLegBottom)
-                end
-
-                if rightLeg then
-                    local rightHipOffset = Vector3.new(torso.Size.X * 0.25, -torso.Size.Y * 0.45, 0)
-                    local rightLegTop = Vector3.new(0, rightLeg.Size.Y * 0.5, 0)
-                    local rightLegBottom = Vector3.new(0, -rightLeg.Size.Y * 0.5, 0)
-                    addSkeletonSegment(d, torso, rightLeg, rightHipOffset, rightLegTop)
-                    addSkeletonSegment(d, rightLeg, rightLeg, rightLegTop, rightLegBottom)
-                end
-            elseif head then
-                -- Fallback: still draw something if torso is missing.
-                addSkeletonSegment(d, head, head, Vector3.new(0, -head.Size.Y * 0.5, 0), Vector3.new(0, head.Size.Y * 0.5, 0))
-            end
         end
     end)
+end
+
+local function updateR6Skeleton(d, char)
+    local head = char:FindFirstChild("Head")
+    local torso = char:FindFirstChild("Torso")
+    local leftArm = char:FindFirstChild("Left Arm")
+    local rightArm = char:FindFirstChild("Right Arm")
+    local leftLeg = char:FindFirstChild("Left Leg")
+    local rightLeg = char:FindFirstChild("Right Leg")
+
+    if not (head and torso and leftArm and rightArm and leftLeg and rightLeg) then
+        for _, ln in ipairs(d.skeletonLines or {}) do
+            if ln then ln.Visible = false end
+        end
+        return
+    end
+
+    local head2d, onHead = Camera:WorldToViewportPoint(head.Position)
+    local torsoUpper2d, onTorsoTop = Camera:WorldToViewportPoint(torso.Position + Vector3.new(0, torso.Size.Y * 0.5, 0))
+    local torsoLower2d, onTorsoBottom = Camera:WorldToViewportPoint(torso.Position + Vector3.new(0, -torso.Size.Y * 0.5, 0))
+    local leftArm2d, onLeftArm = Camera:WorldToViewportPoint(leftArm.Position + Vector3.new(0, -leftArm.Size.Y * 0.5, 0))
+    local rightArm2d, onRightArm = Camera:WorldToViewportPoint(rightArm.Position + Vector3.new(0, -rightArm.Size.Y * 0.5, 0))
+    local leftLeg2d, onLeftLeg = Camera:WorldToViewportPoint(leftLeg.Position + Vector3.new(0, -leftLeg.Size.Y * 0.5, 0))
+    local rightLeg2d, onRightLeg = Camera:WorldToViewportPoint(rightLeg.Position + Vector3.new(0, -rightLeg.Size.Y * 0.5, 0))
+
+    local leftShoulder2d, onLeftShoulder = Camera:WorldToViewportPoint(torso.Position + Vector3.new(-torso.Size.X * 0.5, torso.Size.Y * 0.25, 0))
+    local rightShoulder2d, onRightShoulder = Camera:WorldToViewportPoint(torso.Position + Vector3.new(torso.Size.X * 0.5, torso.Size.Y * 0.25, 0))
+    local leftHip2d, onLeftHip = Camera:WorldToViewportPoint(torso.Position + Vector3.new(-torso.Size.X * 0.25, -torso.Size.Y * 0.5, 0))
+    local rightHip2d, onRightHip = Camera:WorldToViewportPoint(torso.Position + Vector3.new(torso.Size.X * 0.25, -torso.Size.Y * 0.5, 0))
+
+    if not (onHead and onTorsoTop and onTorsoBottom and onLeftArm and onRightArm and onLeftLeg and onRightLeg and onLeftShoulder and onRightShoulder and onLeftHip and onRightHip) then
+        for _, ln in ipairs(d.skeletonLines or {}) do
+            if ln then ln.Visible = false end
+        end
+        return
+    end
+
+    if head2d.Z <= 0 or torsoUpper2d.Z <= 0 or torsoLower2d.Z <= 0 then
+        for _, ln in ipairs(d.skeletonLines or {}) do
+            if ln then ln.Visible = false end
+        end
+        return
+    end
+
+    local shoulderY = (leftShoulder2d.Y + rightShoulder2d.Y) * 0.5
+    local hipY = (leftHip2d.Y + rightHip2d.Y) * 0.5
+    local leftShoulder = Vector2.new(leftShoulder2d.X, shoulderY)
+    local rightShoulder = Vector2.new(rightShoulder2d.X, shoulderY)
+    local leftHip = Vector2.new(leftHip2d.X, hipY)
+    local rightHip = Vector2.new(rightHip2d.X, hipY)
+
+    local headPoint = Vector2.new(head2d.X, head2d.Y)
+    local torsoUpperPoint = Vector2.new(torsoUpper2d.X, torsoUpper2d.Y)
+    local torsoLowerPoint = Vector2.new(torsoLower2d.X, torsoLower2d.Y)
+    local leftArmPoint = Vector2.new(leftArm2d.X, leftArm2d.Y)
+    local rightArmPoint = Vector2.new(rightArm2d.X, rightArm2d.Y)
+    local leftLegPoint = Vector2.new(leftLeg2d.X, leftLeg2d.Y)
+    local rightLegPoint = Vector2.new(rightLeg2d.X, rightLeg2d.Y)
+
+    local color = Color3.fromRGB(255, 255, 255)
+    local lines = d.skeletonLines
+    setSkeletonLine2D(lines[1], headPoint, torsoUpperPoint, 2, color)
+    setSkeletonLine2D(lines[2], torsoUpperPoint, torsoLowerPoint, 2, color)
+    setSkeletonLine2D(lines[3], leftShoulder, rightShoulder, 2, color)
+    setSkeletonLine2D(lines[4], leftShoulder, leftArmPoint, 2, color)
+    setSkeletonLine2D(lines[5], rightShoulder, rightArmPoint, 2, color)
+    setSkeletonLine2D(lines[6], leftHip, leftLegPoint, 2, color)
+    setSkeletonLine2D(lines[7], rightHip, rightLegPoint, 2, color)
 end
 
 local function hideAll(d)
@@ -321,33 +418,45 @@ RunService.Heartbeat:Connect(function()
 
             -- SKELETON
             if Config.SkeletonEnabled then
-                if #d.skeletonSegments == 0 then
+                local wantedMode = humanoid.RigType == Enum.HumanoidRigType.R6 and "R6" or "R15"
+                if #d.skeletonLines == 0 or d.skeletonMode ~= wantedMode then
                     buildSkeleton(plr)
                 end
-                for i, seg in ipairs(d.skeletonSegments) do
-                    local ln = d.skeletonLines[i]
-                    pcall(function()
-                        if ln and seg and seg.a and seg.b and seg.a.Parent and seg.b.Parent then
-                            local p1 = segmentWorldPoint(seg.a, seg.aOffset)
-                            local p2 = segmentWorldPoint(seg.b, seg.bOffset)
-                            if not p1 or not p2 then
-                                ln.Visible = false
-                                return
-                            end
 
-                            local s1, on1 = Camera:WorldToViewportPoint(p1)
-                            local s2, on2 = Camera:WorldToViewportPoint(p2)
-                            if (on1 or on2) and s1.Z > 0 and s2.Z > 0 then
-                                ln.From = Vector2.new(s1.X, s1.Y)
-                                ln.To = Vector2.new(s2.X, s2.Y)
-                                ln.Visible = true
-                            else
-                                ln.Visible = false
-                            end
-                        else
-                            if ln then ln.Visible = false end
-                        end
+                if d.skeletonMode == "R6" then
+                    pcall(function()
+                        updateR6Skeleton(d, char)
                     end)
+                else
+                    for i, seg in ipairs(d.skeletonSegments) do
+                        local ln = d.skeletonLines[i]
+                        pcall(function()
+                            if ln and seg and seg.a and seg.b and seg.a.Parent and seg.b.Parent then
+                                local p1 = segmentWorldPoint(seg.a, seg.aOffset)
+                                local p2 = segmentWorldPoint(seg.b, seg.bOffset)
+                                if not p1 or not p2 then
+                                    ln.Visible = false
+                                    return
+                                end
+
+                                local s1, on1 = Camera:WorldToViewportPoint(p1)
+                                local s2, on2 = Camera:WorldToViewportPoint(p2)
+                                if (on1 or on2) and s1.Z > 0 and s2.Z > 0 then
+                                    setSkeletonLine2D(
+                                        ln,
+                                        Vector2.new(s1.X, s1.Y),
+                                        Vector2.new(s2.X, s2.Y),
+                                        2,
+                                        Color3.fromRGB(255, 255, 255)
+                                    )
+                                else
+                                    ln.Visible = false
+                                end
+                            else
+                                if ln then ln.Visible = false end
+                            end
+                        end)
+                    end
                 end
             else
                 for _, ln in ipairs(d.skeletonLines or {}) do

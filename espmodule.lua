@@ -100,6 +100,8 @@ local function make(plr)
 
         d.skel = {}
         d.skelBuilt = false
+
+        d.tag = nil -- reserved for future labels
     end)
     tracked[plr] = d
 end
@@ -255,6 +257,7 @@ end
 
 RunService.Heartbeat:Connect(function()
     Camera = workspace.CurrentCamera
+    local adminCount = 0
     for plr, d in pairs(tracked) do
         pcall(function()
             if not alive(plr) then
@@ -283,6 +286,7 @@ RunService.Heartbeat:Connect(function()
             local w = h / 2
             local cx, cy = sv.X, sv.Y
             local adm = isAdmin(plr)
+            if adm then adminCount = adminCount + 1 end
             local baseColor = adm and C3(255,0,0) or C3(255,255,255)
 
             local boxOn   = adm and M.AdminBoxEnabled     or M.BoxEnabled
@@ -386,6 +390,21 @@ RunService.Heartbeat:Connect(function()
             end
         end)
     end
+    if M.AdminListEnabled then
+        if not adminLabel then
+            adminLabel = Drawing.new("Text")
+            adminLabel.Size = 16
+            adminLabel.Center = false
+            adminLabel.Outline = true
+            adminLabel.Color = C3(255,0,0)
+        end
+        local vp = Camera and Camera.ViewportSize or Vector2.new(1920,1080)
+        adminLabel.Position = Vector2.new(vp.X - 200, 40)
+        adminLabel.Text = "Admins In Server: "..tostring(adminCount)
+        adminLabel.Visible = true
+    elseif adminLabel then
+        adminLabel.Visible = false
+    end
 end)
 
 local function onPlr(plr)
@@ -416,6 +435,7 @@ function API:SetAdminNames(s) M.AdminNameEnabled = s end
 function API:SetAdminTracers(s) M.AdminTracersEnabled = s end
 function API:SetAdminSkeleton(s) M.AdminSkeletonEnabled = s end
 function API:SetAdminTeamEsp(s) M.AdminTeamEnabled = s end
+function API:SetAdminList(s) M.AdminListEnabled = s end
 function API:SetSkeletonEsp(s)
     M.SkeletonEnabled = s
     if s then

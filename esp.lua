@@ -761,7 +761,7 @@ local function DrawSkeletonESP(plr)
             RightLowerArm_RightHand = DrawLine(),
             LowerTorso_LeftUpperLeg = DrawLine(),
             LeftUpperLeg_LeftLowerLeg = DrawLine(),
-            LefLowerLeg_LeftFoot = DrawLine(),
+            LeftLowerLeg_LeftFoot = DrawLine(),
             LowerTorso_RightUpperLeg = DrawLine(),
             RightUpperLeg_RightLowerLeg = DrawLine(),
             RightLowerLeg_RightFoot = DrawLine(),

@@ -624,14 +624,16 @@ local function DrawSkeletonESP(plr)
 
     local function DrawLine()
         if hasDrawing then
-            local l = Drawing.new("Line")
-            l.Visible = false
-            l.From = Vector2.new(0, 0)
-            l.To = Vector2.new(1, 1)
-            l.Color = Color3.fromRGB(255, 255, 255)
-            l.Thickness = 1
-            l.Transparency = 1
-            return l
+            local success, l = pcall(function() return Drawing.new("Line") end)
+            if success and l then
+                l.Visible = false
+                l.From = Vector2.new(0, 0)
+                l.To = Vector2.new(1, 1)
+                l.Color = Color3.fromRGB(255, 255, 255)
+                l.Thickness = 1
+                l.Transparency = 1
+                return l
+            end
         end
         local l = {
             Visible = false,

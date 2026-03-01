@@ -1,4 +1,4 @@
-﻿-- ESP V2 — Clean module
+-- ESP V2 — Clean module
 -- gethui()-only, Heartbeat, full pcall, randomized names
 -- Features: Skeleton, Box, Name, Health, Tracers
 

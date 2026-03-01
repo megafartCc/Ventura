@@ -120,24 +120,29 @@ local function buildSkeleton(plr)
         if lowerTorso then
             -- R15
             if head and torso then table.insert(pairs_, {head, torso}) end
-            if torso and leftArm then table.insert(pairs_, {torso, leftArm}) end
-            if torso and rightArm then table.insert(pairs_, {torso, rightArm}) end
-            if leftArm and leftHand then table.insert(pairs_, {leftArm, leftHand}) end
-            if rightArm and rightHand then table.insert(pairs_, {rightArm, rightHand}) end
             if torso and lowerTorso then table.insert(pairs_, {torso, lowerTorso}) end
+            if torso and leftArm then table.insert(pairs_, {torso, leftArm}) end
+            if leftArm and leftHand then table.insert(pairs_, {leftArm, leftHand}) end
+            if torso and rightArm then table.insert(pairs_, {torso, rightArm}) end
+            if rightArm and rightHand then table.insert(pairs_, {rightArm, rightHand}) end
             if lowerTorso and leftLeg then table.insert(pairs_, {lowerTorso, leftLeg}) end
-            if lowerTorso and rightLeg then table.insert(pairs_, {lowerTorso, rightLeg}) end
             if leftLeg and leftFoot then table.insert(pairs_, {leftLeg, leftFoot}) end
+            if lowerTorso and rightLeg then table.insert(pairs_, {lowerTorso, rightLeg}) end
             if rightLeg and rightFoot then table.insert(pairs_, {rightLeg, rightFoot}) end
         else
             -- R6
+            -- Spine
             if head and torso then table.insert(pairs_, {head, torso}) end
+            
+            -- Arms (connect Torso to Arms)
             if torso and leftArm then table.insert(pairs_, {torso, leftArm}) end
             if torso and rightArm then table.insert(pairs_, {torso, rightArm}) end
+            
+            -- Legs (connect Torso to Legs)
             if torso and leftLeg then table.insert(pairs_, {torso, leftLeg}) end
             if torso and rightLeg then table.insert(pairs_, {torso, rightLeg}) end
             
-            -- Crossbars for shoulders and hips
+            -- Optional: Shoulders and Hips crossbars to make it look like a body instead of a stick
             if leftArm and rightArm then table.insert(pairs_, {leftArm, rightArm}) end
             if leftLeg and rightLeg then table.insert(pairs_, {leftLeg, rightLeg}) end
         end

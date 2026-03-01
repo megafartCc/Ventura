@@ -1,4 +1,4 @@
-local Players = game:GetService("Players")
+﻿local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local camera = game:GetService("Workspace").CurrentCamera
 local player = Players.LocalPlayer
@@ -791,192 +791,160 @@ RunService.Heartbeat:Connect(function()
     end -- end for plr
 end) -- end Heartbeat
 
-local function DrawSkeletonESP(plr)
-    local data = trackedPlayers[plr]
-    if not data then
-        return
-    end
+local _skeletonData = {}  -- [player] = { lines = {{line,part1,part2},...}, conn }
 
-    local function DrawLine()
-        return NewLine(1, Color3.fromRGB(255, 255, 255))
-    end
-    
-    repeat task.wait() until plr.Character ~= nil and plr.Character:FindFirstChild("Humanoid") ~= nil
+local function skeletonIsAlive(p)
+    if not p or not p.Character then return false end
+    local h = p.Character:FindFirstChildOfClass("Humanoid")
+    return h and h.Health > 0
+end
 
-    local limbs = {}
-    local isR15 = (plr.Character.Humanoid.RigType == Enum.HumanoidRigType.R15)
-    
-    if isR15 then
-        limbs = {
-            Head_UpperTorso = DrawLine(),
-            UpperTorso_LowerTorso = DrawLine(),
-            UpperTorso_LeftUpperArm = DrawLine(),
-            LeftUpperArm_LeftLowerArm = DrawLine(),
-            LeftLowerArm_LeftHand = DrawLine(),
-            UpperTorso_RightUpperArm = DrawLine(),
-            RightUpperArm_RightLowerArm = DrawLine(),
-            RightLowerArm_RightHand = DrawLine(),
-            LowerTorso_LeftUpperLeg = DrawLine(),
-            LeftUpperLeg_LeftLowerLeg = DrawLine(),
-            LeftLowerLeg_LeftFoot = DrawLine(),
-            LowerTorso_RightUpperLeg = DrawLine(),
-            RightUpperLeg_RightLowerLeg = DrawLine(),
-            RightLowerLeg_RightFoot = DrawLine(),
-        }
-    else
-        limbs = {
-            Head_Torso = DrawLine(),
-            Torso_LeftArm = DrawLine(),
-            Torso_RightArm = DrawLine(),
-            Torso_LeftLeg = DrawLine(),
-            Torso_RightLeg = DrawLine(),
-        }
-    end
+local function skeletonCreate(plr)
+    if plr == player then return end
+    if not plr or not plr.Character then return end
+    pcall(function()
+        local character = plr.Character
+        if not character:FindFirstChild("HumanoidRootPart") then return end
 
-    local function SetVisible(state)
-        if limbs then
-            for _, v in pairs(limbs) do
-                if v and v.Visible ~= state then
-                    v.Visible = state
-                end
-            end
-        end
-    end
-    data.SkeletonVisibilityFunc = SetVisible
-    data.SkeletonLimbs = limbs
-
-    local function UpdateR15Skeleton(char)
-        local H, UT, LT, LUA, LLA, LH, RUA, RLA, RH, LUL, LLL, LF, RUL, RLL, RF = nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil
-        pcall(function()
-            H = char.Head.Position
-            UT = char.UpperTorso.Position
-            LT = char.LowerTorso.Position
-            LUA = char.LeftUpperArm.Position
-            LLA = char.LeftLowerArm.Position
-            LH = char.LeftHand.Position
-            RUA = char.RightUpperArm.Position
-            RLA = char.RightLowerArm.Position
-            RH = char.RightHand.Position
-            LUL = char.LeftUpperLeg.Position
-            LLL = char.LeftLowerLeg.Position
-            LF = char.LeftFoot.Position
-            RUL = char.RightUpperLeg.Position
-            RLL = char.RightLowerLeg.Position
-            RF = char.RightFoot.Position
-        end)
-        if not H or not UT then return false end
-
-        local function WTP(p)
-            local wtp, onScreen = camera:WorldToViewportPoint(p)
-            return Vector2.new(wtp.X, wtp.Y), onScreen
-        end
-
-        local H2, onScreen = WTP(H)
-        if not onScreen then return false end
-        local UT2, _ = WTP(UT)
-        local LT2, _ = WTP(LT)
-        local LUA2, _ = WTP(LUA)
-        local LLA2, _ = WTP(LLA)
-        local LH2, _ = WTP(LH)
-        local RUA2, _ = WTP(RUA)
-        local RLA2, _ = WTP(RLA)
-        local RH2, _ = WTP(RH)
-        local LUL2, _ = WTP(LUL)
-        local LLL2, _ = WTP(LLL)
-        local LF2, _ = WTP(LF)
-        local RUL2, _ = WTP(RUL)
-        local RLL2, _ = WTP(RLL)
-        local RF2, _ = WTP(RF)
-
-        limbs.Head_UpperTorso.From, limbs.Head_UpperTorso.To = H2, UT2
-        limbs.UpperTorso_LowerTorso.From, limbs.UpperTorso_LowerTorso.To = UT2, LT2
-        limbs.UpperTorso_LeftUpperArm.From, limbs.UpperTorso_LeftUpperArm.To = UT2, LUA2
-        limbs.LeftUpperArm_LeftLowerArm.From, limbs.LeftUpperArm_LeftLowerArm.To = LUA2, LLA2
-        limbs.LeftLowerArm_LeftHand.From, limbs.LeftLowerArm_LeftHand.To = LLA2, LH2
-        limbs.UpperTorso_RightUpperArm.From, limbs.UpperTorso_RightUpperArm.To = UT2, RUA2
-        limbs.RightUpperArm_RightLowerArm.From, limbs.RightUpperArm_RightLowerArm.To = RUA2, RLA2
-        limbs.RightLowerArm_RightHand.From, limbs.RightLowerArm_RightHand.To = RLA2, RH2
-        limbs.LowerTorso_LeftUpperLeg.From, limbs.LowerTorso_LeftUpperLeg.To = LT2, LUL2
-        limbs.LeftUpperLeg_LeftLowerLeg.From, limbs.LeftUpperLeg_LeftLowerLeg.To = LUL2, LLL2
-        limbs.LeftLowerLeg_LeftFoot.From, limbs.LeftLowerLeg_LeftFoot.To = LLL2, LF2
-        limbs.LowerTorso_RightUpperLeg.From, limbs.LowerTorso_RightUpperLeg.To = LT2, RUL2
-        limbs.RightUpperLeg_RightLowerLeg.From, limbs.RightUpperLeg_RightLowerLeg.To = RUL2, RLL2
-        limbs.RightLowerLeg_RightFoot.From, limbs.RightLowerLeg_RightFoot.To = RLL2, RF2
-
-        return true
-    end
-
-    local function UpdateR6Skeleton(char)
-        local H, T, LA, RA, LL, RL = nil, nil, nil, nil, nil, nil
-        pcall(function()
-            H = char.Head.Position
-            T = char.Torso.Position
-            LA = char["Left Arm"].Position
-            RA = char["Right Arm"].Position
-            LL = char["Left Leg"].Position
-            RL = char["Right Leg"].Position
-        end)
-        if not H or not T then return false end
-
-        local function WTP(p)
-            local wtp, onScreen = camera:WorldToViewportPoint(p)
-            return Vector2.new(wtp.X, wtp.Y), onScreen
-        end
-
-        local H2, onScreen = WTP(H)
-        if not onScreen then return false end
-        local T2, _ = WTP(T)
-        local LA2, _ = WTP(LA)
-        local RA2, _ = WTP(RA)
-        local LL2, _ = WTP(LL)
-        local RL2, _ = WTP(RL)
-
-        limbs.Head_Torso.From, limbs.Head_Torso.To = H2, T2
-        limbs.Torso_LeftArm.From, limbs.Torso_LeftArm.To = T2, LA2
-        limbs.Torso_RightArm.From, limbs.Torso_RightArm.To = T2, RA2
-        limbs.Torso_LeftLeg.From, limbs.Torso_LeftLeg.To = T2, LL2
-        limbs.Torso_RightLeg.From, limbs.Torso_RightLeg.To = T2, RL2
-
-        return true
-    end
-
-    local connection
-    connection = RunService.Heartbeat:Connect(function()
-        pcall(function()
-            local char = plr.Character
-            local humanoid = char and char:FindFirstChildOfClass("Humanoid")
-            if not skeletonEspEnabled or not humanoid or humanoid.Health <= 0 then
-                SetVisible(false)
-                return
-            end
-
-            local isVisible = false
+        -- clean old if exists
+        if _skeletonData[plr] then
             pcall(function()
-                if humanoid.RigType == Enum.HumanoidRigType.R15 then
-                    isVisible = UpdateR15Skeleton(char)
-                else
-                    isVisible = UpdateR6Skeleton(char)
+                for _, d in ipairs(_skeletonData[plr].lines or {}) do
+                    if d.line then pcall(function() d.line:Remove() end) end
                 end
             end)
-
-            local ref = limbs and limbs.Head_UpperTorso
-            if isVisible then
-                if ref and not ref.Visible then
-                    SetVisible(true)
-                end
-            else
-                if ref and ref.Visible then
-                    SetVisible(false)
-                end
+            if _skeletonData[plr].conn then
+                safeDisconnectConn(_skeletonData[plr].conn)
             end
+            _skeletonData[plr] = nil
+        end
 
-            if not Players:FindFirstChild(plr.Name) then
-                safeDisconnectConn(connection)
+        _skeletonData[plr] = { lines = {} }
+
+        -- Resolve parts (handles both R6 and R15)
+        local head       = character:FindFirstChild("Head")
+        local torso      = character:FindFirstChild("UpperTorso") or character:FindFirstChild("Torso")
+        local lowerTorso = character:FindFirstChild("LowerTorso")
+        local leftArm    = character:FindFirstChild("LeftUpperArm") or character:FindFirstChild("Left Arm")
+        local rightArm   = character:FindFirstChild("RightUpperArm") or character:FindFirstChild("Right Arm")
+        local leftHand   = character:FindFirstChild("LeftHand") or character:FindFirstChild("LeftLowerArm")
+        local rightHand  = character:FindFirstChild("RightHand") or character:FindFirstChild("RightLowerArm")
+        local leftLeg    = character:FindFirstChild("LeftUpperLeg") or character:FindFirstChild("Left Leg")
+        local rightLeg   = character:FindFirstChild("RightUpperLeg") or character:FindFirstChild("Right Leg")
+        local leftFoot   = character:FindFirstChild("LeftFoot") or character:FindFirstChild("LeftLowerLeg")
+        local rightFoot  = character:FindFirstChild("RightFoot") or character:FindFirstChild("RightLowerLeg")
+
+        local connections = {}
+        if head and torso then table.insert(connections, {head, torso}) end
+        if torso and lowerTorso then table.insert(connections, {torso, lowerTorso}) end
+        if torso and leftArm then table.insert(connections, {torso, leftArm}) end
+        if torso and rightArm then table.insert(connections, {torso, rightArm}) end
+        if leftArm and leftHand then table.insert(connections, {leftArm, leftHand}) end
+        if rightArm and rightHand then table.insert(connections, {rightArm, rightHand}) end
+        if (lowerTorso or torso) and leftLeg then table.insert(connections, {lowerTorso or torso, leftLeg}) end
+        if (lowerTorso or torso) and rightLeg then table.insert(connections, {lowerTorso or torso, rightLeg}) end
+        if leftLeg and leftFoot then table.insert(connections, {leftLeg, leftFoot}) end
+        if rightLeg and rightFoot then table.insert(connections, {rightLeg, rightFoot}) end
+
+        for _, conn in ipairs(connections) do
+            local p1, p2 = conn[1], conn[2]
+            if p1 and p2 then
+                pcall(function()
+                    local ln = NewLine(BlissfulSettings.Box_Thickness, Color3.fromRGB(255, 255, 255))
+                    if ln then
+                        ln.Visible = false
+                        table.insert(_skeletonData[plr].lines, { line = ln, part1 = p1, part2 = p2 })
+                    end
+                end)
             end
+        end
+
+        -- Heartbeat updater for this player's skeleton
+        local conn
+        conn = RunService.Heartbeat:Connect(function()
+            pcall(function()
+                local sd = _skeletonData[plr]
+                if not sd then conn:Disconnect() return end
+                if not skeletonEspEnabled or not skeletonIsAlive(plr) then
+                    for _, d in ipairs(sd.lines) do
+                        pcall(function() d.line.Visible = false end)
+                    end
+                    return
+                end
+                local char = plr.Character
+                local localChar = player.Character
+                local localRoot = localChar and localChar:FindFirstChild("HumanoidRootPart")
+                local hrp = char and char:FindFirstChild("HumanoidRootPart")
+                if not hrp or not localRoot then return end
+
+                local dist = (hrp.Position - localRoot.Position).Magnitude
+                local alpha = math.clamp(1 - (dist / 500), 0.3, 1)
+
+                for _, d in ipairs(sd.lines) do
+                    pcall(function()
+                        local p1, p2, ln = d.part1, d.part2, d.line
+                        if p1 and p2 and p1.Parent and p2.Parent and ln then
+                            local s1, on1 = camera:WorldToViewportPoint(p1.Position)
+                            local s2, on2 = camera:WorldToViewportPoint(p2.Position)
+                            if (on1 or on2) and s1.Z > 0 and s2.Z > 0 then
+                                ln.From = Vector2.new(s1.X, s1.Y)
+                                ln.To   = Vector2.new(s2.X, s2.Y)
+                                ln.Transparency = alpha
+                                ln.Visible = true
+                            else
+                                ln.Visible = false
+                            end
+                        else
+                            if ln then ln.Visible = false end
+                        end
+                    end)
+                end
+
+                if not Players:FindFirstChild(plr.Name) then
+                    safeDisconnectConn(conn)
+                end
+            end)
         end)
+        _skeletonData[plr].conn = conn
+        -- also store on trackedPlayers for cleanup
+        if trackedPlayers[plr] then
+            trackedPlayers[plr].SkeletonConnection = conn
+        end
     end)
-    data.SkeletonConnection = connection
 end
+
+local function skeletonRemove(plr)
+    local sd = _skeletonData[plr]
+    if not sd then return end
+    pcall(function()
+        for _, d in ipairs(sd.lines or {}) do
+            if d.line then pcall(function() d.line:Remove() end) end
+        end
+    end)
+    if sd.conn then safeDisconnectConn(sd.conn) end
+    _skeletonData[plr] = nil
+end
+
+local function DrawSkeletonESP(plr)
+    -- CharacterAdded hook so skeleton rebuilds on respawn
+    plr.CharacterAdded:Connect(function()
+        task.wait(0.5)
+        if skeletonEspEnabled then
+            pcall(skeletonCreate, plr)
+        end
+    end)
+    plr.CharacterRemoving:Connect(function()
+        pcall(skeletonRemove, plr)
+    end)
+    if plr.Character then
+        task.spawn(function()
+            task.wait(0.5)
+            pcall(skeletonCreate, plr)
+        end)
+    end
+end
+
+
 
 local function trackPlayer(newplr)
     if newplr.Name ~= player.Name then
@@ -1039,7 +1007,17 @@ function PlayerESP:SetTeamColor(state)
 end
 function PlayerESP:SetSkeletonEsp(state)
     skeletonEspEnabled = state
+    if state then
+        for plr in pairs(trackedPlayers) do
+            pcall(skeletonCreate, plr)
+        end
+    else
+        for plr in pairs(_skeletonData) do
+            pcall(skeletonRemove, plr)
+        end
+    end
 end
+
 function PlayerESP:SetNameEsp(state)
     nameEspEnabled = state
 end

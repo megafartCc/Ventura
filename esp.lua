@@ -942,33 +942,38 @@ local function DrawSkeletonESP(plr)
 
     local connection
     connection = RunService.Heartbeat:Connect(function()
-        if not skeletonEspEnabled or not plr.Character or plr.Character.Humanoid.Health <= 0 then
-            SetVisible(false)
-            return
-        end
-
-        local isVisible = false
         pcall(function()
-            if plr.Character.Humanoid.RigType == Enum.HumanoidRigType.R15 then
-                isVisible = UpdateR15Skeleton(plr.Character)
+            local char = plr.Character
+            local humanoid = char and char:FindFirstChildOfClass("Humanoid")
+            if not skeletonEspEnabled or not humanoid or humanoid.Health <= 0 then
+                SetVisible(false)
+                return
+            end
+
+            local isVisible = false
+            pcall(function()
+                if humanoid.RigType == Enum.HumanoidRigType.R15 then
+                    isVisible = UpdateR15Skeleton(char)
+                else
+                    isVisible = UpdateR6Skeleton(char)
+                end
+            end)
+
+            local ref = limbs and limbs.Head_UpperTorso
+            if isVisible then
+                if ref and not ref.Visible then
+                    SetVisible(true)
+                end
             else
-                isVisible = UpdateR6Skeleton(plr.Character)
+                if ref and ref.Visible then
+                    SetVisible(false)
+                end
+            end
+
+            if not Players:FindFirstChild(plr.Name) then
+                safeDisconnectConn(connection)
             end
         end)
-
-        if isVisible then
-            if not limbs.Head_UpperTorso.Visible then
-                SetVisible(true)
-            end
-        else
-            if limbs.Head_UpperTorso.Visible then
-                SetVisible(false)
-            end
-        end
-
-        if not Players:FindFirstChild(plr.Name) then
-            safeDisconnectConn(connection)
-        end
     end)
     data.SkeletonConnection = connection
 end

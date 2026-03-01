@@ -1,895 +1,414 @@
-﻿local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
-local camera = game:GetService("Workspace").CurrentCamera
-local player = Players.LocalPlayer
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
+﻿-- ESP V2 — Clean module
+-- gethui()-only, Heartbeat, full pcall, randomized names
+-- Features: Skeleton, Box, Name, Health, Tracers
 
--- Random name generator — makes UI instances look like native Roblox UI
-local _rngSeed = tick()
-local function _rname()
-    local chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
-    local len = math.random(6, 14)
-    local s = ""
-    for i = 1, len do
-        _rngSeed = (_rngSeed * 1664525 + 1013904223) % (2^32)
-        local idx = (_rngSeed % #chars) + 1
-        s = s .. chars:sub(idx, idx)
+local Players    = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local Camera     = workspace.CurrentCamera
+local LocalPlayer = Players.LocalPlayer
+
+------------------------------------------------------------
+-- Random name generator (looks like native Roblox UI IDs)
+------------------------------------------------------------
+local _seed = tick()
+local function rname()
+    local c = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+    local s, n = "", math.random(8, 14)
+    for _ = 1, n do
+        _seed = (_seed * 1664525 + 1013904223) % (2^32)
+        s = s .. c:sub((_seed % #c) + 1, (_seed % #c) + 1)
     end
     return s
 end
 
--- Persistent gethui root (retrieved once, cached)
-local _huiRoot = nil
+------------------------------------------------------------
+-- gethui()-only (cached, never CoreGui)
+------------------------------------------------------------
+local _hui = nil
 local function getHUI()
-    if _huiRoot then return _huiRoot end
+    if _hui then return _hui end
     local ok, r = pcall(function() return gethui and gethui() end)
-    if ok and r then
-        _huiRoot = r
-        return r
-    end
-    return nil  -- never fall back to CoreGui
+    if ok and r then _hui = r end
+    return _hui
 end
 
-local THEME = {
-    panel = Color3.fromRGB(16, 18, 24),
-    panel2 = Color3.fromRGB(22, 24, 30),
-    text = Color3.fromRGB(230, 235, 240),
-    textDim = Color3.fromRGB(170, 176, 186),
-    accentA = Color3.fromRGB(64, 156, 255),
-    accentB = Color3.fromRGB(0, 204, 204),
-    gold = Color3.fromRGB(255, 215, 0),
-}
-
-local BlissfulSettings = {
-    Box_Color = Color3.fromRGB(255, 255, 255),
-    Tracer_Color = Color3.fromRGB(255, 255, 255),
-    Tracer_Thickness = 1,
-    Box_Thickness = 1,
-    Tracer_Origin = "Bottom",
-    Tracer_FollowMouse = false,
-}
-local hotbarDisplaySet = {}
-
-local boxEspEnabled = false
-local healthEspEnabled = false
-local tracersEnabled = false
-local teamCheckEnabled = false
-local teamColorEnabled = true
-local nameEspEnabled = false
-local hotbarEspEnabled = false
-local skeletonEspEnabled = false
-
-local trackedPlayers = {}
-local black = Color3.fromRGB(0, 0, 0)
-local mouse = player:GetMouse()
-
-local hasDrawing = (typeof(Drawing) == "table" or typeof(Drawing) == "userdata")
-    and typeof(Drawing.new) == "function"
-if hasDrawing then
-    local success, obj = pcall(function() return Drawing.new("Line") end)
-    if not success or not obj then
-        hasDrawing = false
-    else
-        pcall(function() obj:Remove() end)
-    end
-end
-local hasTaskCancel = (type(task) == "table" or type(task) == "userdata")
-    and type(task.cancel) == "function"
-
-local autoDigEnabled = false
-local autoDigThread = nil
-local autoDigManualEnabled = false
-local autoSprinklerEnabled = false
-local autoBuffItemsState = { false }
-local autoBuffItemsThread = { nil }
-
-
-local function safeFire(event, ...)
-    if not event then return end
-    local args = { ... }
-    pcall(function()
-        if #args == 0 then
-            event:FireServer()
-        else
-            event:FireServer(table.unpack(args))
-        end
-    end)
-end
-local function getPlayerActivesCommand()
-    local eventsFolder = ReplicatedStorage:FindFirstChild("Events")
-    or ReplicatedStorage:WaitForChild("Events", 1)
-    return eventsFolder and eventsFolder:FindFirstChild("PlayerActivesCommand")
-end
-local function firePlayerActives(name)
-    local ev = getPlayerActivesCommand()
-    if not ev then return end
-    safeFire(ev, { Name = tostring(name) })
-end
-local function startAutoLoop(stateRef, threadRef, interval, callback)
-    if threadRef[1] then return end
-    stateRef[1] = true
-    threadRef[1] = task.spawn(function()
-        while stateRef[1] do
-            callback()
-            task.wait(interval)
-        end
-        threadRef[1] = nil
-    end)
-end
-local function stopAutoLoop(stateRef, threadRef)
-    stateRef[1] = false
-    if threadRef[1] then
-        if hasTaskCancel then
-            pcall(function()
-                task.cancel(threadRef[1])
-            end)
-        end
-        threadRef[1] = nil
-    end
-end
-local function startAutoDig()
-    if autoDigThread then
-        return
-    end
-    autoDigEnabled = true
-    autoDigThread = task.spawn(function()
-        local args = {}
-        while autoDigEnabled do
-            local eventsFolder = ReplicatedStorage:FindFirstChild("Events")
-            or ReplicatedStorage:WaitForChild("Events", 1)
-            local toolCollectRemote = eventsFolder and eventsFolder:FindFirstChild("ToolCollect")
-            if toolCollectRemote then
-                pcall(function()
-                    toolCollectRemote:FireServer(table.unpack(args))
-                end)
-            end
-            task.wait(0.1)
-        end
-        autoDigThread = nil
-    end)
-end
-local function stopAutoDig()
-    autoDigEnabled = false
-    if autoDigThread then
-        if hasTaskCancel then
-            pcall(function()
-                task.cancel(autoDigThread)
-            end)
-        end
-        autoDigThread = nil
-    end
-end
-local function refreshAutoDig(isAutoFarmEnabled)
-    local shouldRun = isAutoFarmEnabled or autoDigManualEnabled
-    if shouldRun and not autoDigEnabled then
-        startAutoDig()
-    elseif not shouldRun and autoDigEnabled then
-        stopAutoDig()
-    end
-end
-local function releaseBuffs()
-    local buffs = {
-        "Blue Extract",
-        "Red Extract",
-        "Oil",
-        "Enzymes",
-        "Glue",
-        "Glitter",
-        "Tropical Drink",
-    }
-    for _, name in ipairs(buffs) do
-        firePlayerActives(name)
-        task.wait(0.1)
-    end
-end
-
-local function getHudRoot()
-    return getHUI()  -- gethui() only, never CoreGui
-end
-
-local function safeDisconnectConn(conn)
-    if conn and typeof(conn) == "RBXScriptConnection" then
-        pcall(function()
-            conn:Disconnect()
-        end)
-    end
-end
-
-local _fallbackGui = nil
-local function getFallbackGui()
+------------------------------------------------------------
+-- ScreenGui (single, random name, inside gethui)
+------------------------------------------------------------
+local _gui = nil
+local function getGui()
     local hui = getHUI()
-    if not hui then return nil end  -- gethui unavailable — skip drawing entirely
-    if _fallbackGui and _fallbackGui.Parent then return _fallbackGui end
-    local gui = Instance.new("ScreenGui")
-    gui.Name = _rname()  -- random innocent-looking name
-    gui.ResetOnSpawn = false
-    gui.IgnoreGuiInset = true
-    gui.Parent = hui
-    _fallbackGui = gui
-    return gui
+    if not hui then return nil end
+    if _gui and _gui.Parent then return _gui end
+    local g = Instance.new("ScreenGui")
+    g.Name = rname()
+    g.ResetOnSpawn = false
+    g.IgnoreGuiInset = true
+    g.Parent = hui
+    _gui = g
+    return g
 end
 
-local function NewQuad(thickness, color)
-    if hasDrawing then
-        local success, quad = pcall(function() return Drawing.new("Quad") end)
-        if success and quad then
-            quad.Visible = false
-            quad.PointA = Vector2.new(0, 0)
-            quad.PointB = Vector2.new(0, 0)
-            quad.PointC = Vector2.new(0, 0)
-            quad.PointD = Vector2.new(0, 0)
-            quad.Color = color
-            quad.Filled = false
-            quad.Thickness = thickness
-            quad.Transparency = 1
-            return quad
-        end
-    end
-    -- Fallback for Box ESP (4 lines instead of 1 quad, or 1 Frame)
-    local f = Instance.new("Frame")
-    f.Name = _rname()
-    f.BorderSizePixel = thickness
-    f.BorderColor3 = color
-    f.BackgroundTransparency = 1
-    f.Visible = false
-    local fg = getFallbackGui()
-    if not fg then
-        -- gethui unavailable, return a no-op dummy
-        local dummy = { Visible=false, PointA=Vector2.new(0,0), PointB=Vector2.new(0,0), PointC=Vector2.new(0,0), PointD=Vector2.new(0,0), Color=color, Filled=false, Thickness=thickness, Transparency=1 }
-        function dummy:Remove() end
-        return dummy
-    end
-    f.Parent = fg
-    
-    local quad = {
-        Visible = false,
-        PointA = Vector2.new(0, 0),
-        PointB = Vector2.new(0, 0),
-        PointC = Vector2.new(0, 0),
-        PointD = Vector2.new(0, 0),
-        Color = color,
-        Filled = false,
-        Thickness = thickness,
-        Transparency = 1,
-        _frame = f
-    }
-    
-    -- The quad needs a metatable to update the Frame when properties change
-    setmetatable(quad, {
-        __newindex = function(t, k, v)
-            rawset(t, k, v)
-            if k == "Visible" then t._frame.Visible = v
-            elseif k == "Color" then t._frame.BorderColor3 = v
-            elseif k == "PointA" or k == "PointD" then
-                if t.PointA and t.PointD then
-                    local minX = math.min(t.PointA.X, t.PointD.X)
-                    local minY = math.min(t.PointA.Y, t.PointD.Y)
-                    local maxX = math.max(t.PointA.X, t.PointD.X)
-                    local maxY = math.max(t.PointA.Y, t.PointD.Y)
-                    t._frame.Position = UDim2.fromOffset(minX, minY)
-                    t._frame.Size = UDim2.fromOffset(maxX - minX, maxY - minY)
-                end
-            end
-        end
-    })
-    
-    function quad:Remove() self._frame:Destroy() end
-    return quad
-end
-
+------------------------------------------------------------
+-- Drawing helpers (gethui Frame/TextLabel fallback)
+------------------------------------------------------------
 local function NewLine(thickness, color)
-    if hasDrawing then
-        local success, line = pcall(function() return Drawing.new("Line") end)
-        if success and line then
-            line.Visible = false
-            line.From = Vector2.new(0, 0)
-            line.To = Vector2.new(0, 0)
-            line.Color = color
-            line.Thickness = thickness
-            line.Transparency = 1
-            return line
-        end
-    end
-
+    local gui = getGui()
+    if not gui then return nil end
     local f = Instance.new("Frame")
-    f.Name = _rname()
+    f.Name = rname()
+    f.BackgroundColor3 = color or Color3.fromRGB(255, 255, 255)
     f.BorderSizePixel = 0
-    f.BackgroundColor3 = color
-    f.Visible = false
     f.AnchorPoint = Vector2.new(0.5, 0.5)
-    local fg = getFallbackGui()
-    if not fg then
-        local dummy = { Visible=false, From=Vector2.new(0,0), To=Vector2.new(0,0), Color=color, Thickness=thickness, Transparency=1 }
-        function dummy:Remove() end
-        return dummy
-    end
-    f.Parent = fg
+    f.ZIndex = 10
+    f.Visible = false
+    f.Parent = gui
 
     local line = {
+        _frame = f,
         Visible = false,
         From = Vector2.new(0, 0),
         To = Vector2.new(0, 0),
         Color = color,
-        Thickness = thickness,
+        Thickness = thickness or 1,
         Transparency = 1,
-        _frame = f
     }
-    
+
+    function line:Remove() pcall(function() self._frame:Destroy() end) end
+
     setmetatable(line, {
         __newindex = function(t, k, v)
             rawset(t, k, v)
-            if k == "Visible" then t._frame.Visible = v
-            elseif k == "Color" then t._frame.BackgroundColor3 = v
+            if k == "Visible" then
+                t._frame.Visible = v
+            elseif k == "Color" then
+                t._frame.BackgroundColor3 = v
+            elseif k == "Transparency" then
+                t._frame.BackgroundTransparency = 1 - v
             elseif k == "From" or k == "To" then
-                if t.From and t.To then
-                    local dist = (t.To - t.From).Magnitude
-                    local center = (t.From + t.To) / 2
-                    local angle = math.atan2(t.To.Y - t.From.Y, t.To.X - t.From.X)
-                    t._frame.Position = UDim2.fromOffset(center.X, center.Y)
-                    t._frame.Size = UDim2.fromOffset(dist, t.Thickness)
+                local from = t.From
+                local to = t.To
+                if from and to then
+                    local delta = to - from
+                    local len = delta.Magnitude
+                    if len < 0.5 then t._frame.Visible = false return end
+                    local angle = math.atan2(delta.Y, delta.X)
+                    local mid = from + delta * 0.5
+                    t._frame.Size = UDim2.fromOffset(math.ceil(len), t.Thickness or 1)
+                    t._frame.Position = UDim2.fromOffset(mid.X, mid.Y)
                     t._frame.Rotation = math.deg(angle)
                 end
             end
         end
     })
-    
-    function line:Remove() self._frame:Destroy() end
+
     return line
 end
 
 local function NewText(size, color)
-    if hasDrawing then
-        local success, txt = pcall(function() return Drawing.new("Text") end)
-        if success and txt then
-            txt.Visible = false
-            txt.Center = true
-            txt.Outline = true
-            txt.Size = size
-            txt.Color = color
-            return txt
-        end
-    end
-
+    local gui = getGui()
+    if not gui then return nil end
     local f = Instance.new("TextLabel")
-    f.Name = _rname()
+    f.Name = rname()
     f.BackgroundTransparency = 1
-    f.TextColor3 = color
+    f.TextColor3 = color or Color3.fromRGB(255, 255, 255)
     f.TextStrokeTransparency = 0
-    f.TextSize = size
+    f.TextSize = size or 14
     f.Font = Enum.Font.Code
     f.Visible = false
-    local fg = getFallbackGui()
-    if not fg then
-        local dummy = { Visible=false, Center=true, Outline=true, Size=size, Color=color, Text="", Position=Vector2.new(0,0) }
-        function dummy:Remove() end
-        return dummy
-    end
-    f.Parent = fg
+    f.Size = UDim2.fromOffset(200, 30)
+    f.TextXAlignment = Enum.TextXAlignment.Center
+    f.TextYAlignment = Enum.TextYAlignment.Center
+    f.ZIndex = 10
+    f.Parent = gui
 
     local txt = {
+        _label = f,
         Visible = false,
-        Center = true,
-        Outline = true,
-        Size = size,
-        Color = color,
         Text = "",
         Position = Vector2.new(0, 0),
-        _label = f
+        Color = color,
+        Size = size or 14,
+        Center = true,
     }
-    
+
+    function txt:Remove() pcall(function() self._label:Destroy() end) end
+
     setmetatable(txt, {
         __newindex = function(t, k, v)
             rawset(t, k, v)
             if k == "Visible" then t._label.Visible = v
-            elseif k == "Color" then t._label.TextColor3 = v
             elseif k == "Text" then t._label.Text = v
+            elseif k == "Color" then t._label.TextColor3 = v
             elseif k == "Size" then t._label.TextSize = v
             elseif k == "Position" then
-                if t.Position then
-                    t._label.Position = UDim2.fromOffset(t.Position.X, t.Position.Y)
-                end
-            elseif k == "Center" then
-                if v then
-                    t._label.AnchorPoint = Vector2.new(0.5, 0.5)
-                else
-                    t._label.AnchorPoint = Vector2.new(0, 0)
-                end
+                t._label.Position = UDim2.fromOffset(v.X - 100, v.Y - 8)
             end
         end
     })
-    
-    function txt:Remove() self._label:Destroy() end
+
     return txt
 end
 
-local function ESP(plr)
-    local library = {
-        blacktracer = NewLine(BlissfulSettings.Tracer_Thickness * 2, black),
-        tracer = NewLine(BlissfulSettings.Tracer_Thickness, BlissfulSettings.Tracer_Color),
-        black = NewQuad(BlissfulSettings.Box_Thickness * 2, black),
-        box = NewQuad(BlissfulSettings.Box_Thickness, BlissfulSettings.Box_Color),
-        healthbar = NewLine(5, black),
-        greenhealth = NewLine(3, black),
-        nametext = nil,
-        hotbartext = nil,
-        teamtext = nil,
-    }
+------------------------------------------------------------
+-- Module table
+------------------------------------------------------------
+local ESP = {}
+local Config = {
+    BoxEnabled       = false,
+    NameEnabled      = false,
+    HealthEnabled    = false,
+    TracersEnabled   = false,
+    SkeletonEnabled  = false,
+    BoxColor         = Color3.fromRGB(255, 255, 255),
+    TracerColor      = Color3.fromRGB(255, 255, 255),
+    TracerOrigin     = "Bottom",   -- "Bottom" or "Middle"
+    BoxThickness     = 1,
+    TracerThickness  = 1,
+    MaxDistance       = 500,
+}
 
-    local hotbarGui = nil
-    local hotbarFrame = nil
-    local hotbarViewport = nil
-    local hotbarCam = nil
-    local lastToolName = nil
+local tracked = {}  -- [player] = { box, tracer, name, health, skeleton }
 
-    local function ensureHotbarGui(anchorPart)
-        if hotbarGui and hotbarGui.Parent == nil then
-            hotbarGui = nil
-        end
-        if hotbarGui then
-            return
-        end
-        local BillboardGui = (gethui and gethui() or game:GetService("CoreGui")):FindFirstChild("Eps_HotbarBillboard_" .. plr.Name)
-        if BillboardGui then
-            hotbarGui = BillboardGui
-        else
-            hotbarGui = Instance.new("BillboardGui")
-            hotbarGui.Name = "HotbarBillboard_" .. plr.Name
-            hotbarGui.AlwaysOnTop = true
-            hotbarGui.Size = UDim2.fromOffset(64, 64)
-            hotbarGui.StudsOffset = Vector3.new(0, -3.8, 0)
-            hotbarGui.MaxDistance = 500
-            hotbarGui.Adornee = anchorPart
-            hotbarGui.Parent = getHudRoot()
-        end
-
-        hotbarFrame = hotbarGui:FindFirstChild("HotbarFrame")
-        if not hotbarFrame then
-            hotbarFrame = Instance.new("Frame")
-            hotbarFrame.Name = "HotbarFrame"
-            hotbarFrame.Size = UDim2.fromScale(1, 1)
-            hotbarFrame.BackgroundColor3 = THEME.panel
-            hotbarFrame.BackgroundTransparency = 0.35
-            hotbarFrame.BorderSizePixel = 0
-            hotbarFrame.Parent = hotbarGui
-            local corner = Instance.new("UICorner", hotbarFrame)
-            corner.CornerRadius = UDim.new(0, 10)
-        end
-        hotbarViewport = hotbarFrame:FindFirstChild("HotbarViewport")
-        if not hotbarViewport then
-            hotbarViewport = Instance.new("ViewportFrame")
-            hotbarViewport.Name = "HotbarViewport"
-            hotbarViewport.AnchorPoint = Vector2.new(0.5, 0.5)
-            hotbarViewport.Position = UDim2.fromScale(0.5, 0.5)
-            hotbarViewport.Size = UDim2.fromScale(0.9, 0.9)
-            hotbarViewport.BackgroundTransparency = 1
-            hotbarViewport.Ambient = Color3.fromRGB(200, 200, 200)
-            hotbarViewport.LightColor = Color3.fromRGB(255, 255, 255)
-            hotbarViewport.LightDirection = Vector3.new(0, -1, -1)
-            hotbarViewport.Parent = hotbarFrame
-            local cam = Instance.new("Camera")
-            cam.Name = "HotbarCam"
-            cam.FieldOfView = 40
-            cam.Parent = hotbarViewport
-            hotbarCam = cam
-            hotbarViewport.CurrentCamera = hotbarCam
-        else
-            hotbarCam = hotbarViewport:FindFirstChild("HotbarCam")
-            if not hotbarCam then
-                local cam = Instance.new("Camera")
-                cam.Name = "HotbarCam"
-                cam.FieldOfView = 40
-                cam.Parent = hotbarViewport
-                hotbarCam = cam
-                hotbarViewport.CurrentCamera = hotbarCam
-            end
-        end
-    end
-    
-    local function clearViewport()
-        if hotbarViewport then
-            for _, ch in ipairs(hotbarViewport:GetChildren()) do
-                if ch:IsA("Model") or ch:IsA("BasePart") or ch:IsA("Camera") then
-                    if ch.Name ~= "HotbarCam" then
-                        ch:Destroy()
-                    end
-                end
-            end
-        end
-    end
-    
-    local function setViewportToTool(tool)
-        if not tool then
-            return
-        end
-        clearViewport()
-        local model = Instance.new("Model")
-        model.Name = "ToolPreview"
-        model.Parent = hotbarViewport
-        
-        local function cloneParts(instance)
-            for _, d in ipairs(instance:GetDescendants()) do
-                if d:IsA("BasePart") then
-                    local cp = d:Clone()
-                    cp.Anchored = true
-                    cp.CanCollide = false
-                    cp.Parent = model
-                end
-            end
-        end
-        
-        pcall(cloneParts, tool)
-        local handle = tool:FindFirstChild("Handle")
-        if handle and #model:GetChildren() == 0 then
-            local h = handle:Clone()
-            h.Anchored = true
-            h.CanCollide = false
-            h.Parent = model
-        end
-        
-        local cf, size = model:GetBoundingBox()
-        local center = cf.Position
-        local maxDim = math.max(size.X, size.Y, size.Z)
-        local distance = (maxDim == 0 and 2) or (maxDim * 2.2)
-        local viewPos = (cf * CFrame.new(0, 0, distance)).Position
-        if hotbarCam then
-            hotbarCam.CFrame = CFrame.new(viewPos, center)
-        end
-    end
-    
-    local function destroyHotbarGui()
-        if hotbarGui then
-            pcall(function()
-                hotbarGui:Destroy()
-            end)
-        end
-        hotbarGui, hotbarFrame, hotbarViewport, hotbarCam = nil, nil, nil, nil
-        lastToolName = nil
-    end
-
-    -- Store library reference so the shared master loop can render this player
-    trackedPlayers[plr] = trackedPlayers[plr] or {}
-    trackedPlayers[plr].Library = library
-    trackedPlayers[plr].DestroyHotbarGui = destroyHotbarGui
-    trackedPlayers[plr].EnsureHotbarGui = ensureHotbarGui
-    trackedPlayers[plr].SetViewportToTool = setViewportToTool
-    trackedPlayers[plr].HotbarGuiRef = function() return hotbarGui end
-    trackedPlayers[plr].SetHotbarGui = function(v) hotbarGui = v end
-end
-
--- ============================================================
--- SINGLE SHARED MASTER LOOP (Heartbeat — 1 connection total)
--- ============================================================
-RunService.Heartbeat:Connect(function()
-    for plr, data in pairs(trackedPlayers) do
-        local library = data.Library
-        if not library then continue end
-
-        local destroyHotbarGui = data.DestroyHotbarGui
-        local ensureHotbarGui  = data.EnsureHotbarGui
-        local setViewportToTool= data.SetViewportToTool
-
-        local function hideAll()
-            for _, d in pairs(library) do
-                if d and d.Visible then d.Visible = false end
-            end
-            if destroyHotbarGui then destroyHotbarGui() end
-        end
-
-        local ok = pcall(function()
-        if
-                    plr.Character ~= nil
-                    and plr.Character:FindFirstChild("Humanoid") ~= nil
-                    and plr.Character:FindFirstChild("HumanoidRootPart") ~= nil
-                    and plr.Character.Humanoid.Health > 0
-                    and plr.Character:FindFirstChild("Head") ~= nil
-                then
-                    local humanoid = plr.Character.Humanoid
-                    local hrp = plr.Character.HumanoidRootPart
-                    local shakeOffset = humanoid.CameraOffset
-                    local stable_hrp_pos_3d = hrp.Position - shakeOffset
-                    local HumPos, OnScreen =
-                        camera:WorldToViewportPoint(stable_hrp_pos_3d)
-                    if OnScreen then
-                        local box_top_3d = stable_hrp_pos_3d + Vector3.new(0, 3, 0)
-                        local box_bottom_3d = stable_hrp_pos_3d + Vector3.new(0, -3, 0)
-                        local box_top_2d = camera:WorldToViewportPoint(box_top_3d)
-                        local box_bottom_2d = camera:WorldToViewportPoint(box_bottom_3d)
-                        
-                        local proj_height = box_bottom_2d.Y - box_top_2d.Y
-                        local half_height = proj_height / 2
-                        local half_width = half_height / 2
-                        half_height = math.clamp(half_height, 2, math.huge)
-                        half_width = math.clamp(half_width, 1, math.huge)
-                        
-                        local center_x = HumPos.X
-                        local center_y = HumPos.Y
-                        local yTop = center_y - half_height
-                        local scale = math.clamp(half_height, 8, 220)
-                        local nameSize = math.floor(math.clamp(scale * 0.30, 10, 18))
-                        local hotbarSize = math.floor(math.clamp(scale * 0.28, 9, 16))
-                        local teamSize = math.floor(math.clamp(scale * 0.22, 8, 13))
-                        local margin = math.floor(math.clamp(scale * 0.10, 5, 12))
-
-                        if nameEspEnabled then
-                            if not library.nametext then
-                                local t = NewText(nameSize, Color3.fromRGB(255, 255, 255))
-                                library.nametext = t
-                            end
-                            if library.nametext then
-                                local t = library.nametext
-                                t.Size = nameSize
-                                t.Text = plr.DisplayName or plr.Name
-                                t.Position = Vector2.new(
-                                    center_x,
-                                    yTop - (margin + math.floor(nameSize * 0.60))
-                                )
-                                t.Color = Color3.fromRGB(255, 255, 255)
-                                t.Visible = true
-                            end
-                        elseif library.nametext then
-                            library.nametext.Visible = false
-                        end
-
-                        if boxEspEnabled then
-                            local function Size(item)
-                                item.PointA = Vector2.new(center_x + half_width, center_y - half_height)
-                                item.PointB = Vector2.new(center_x - half_width, center_y - half_height)
-                                item.PointC = Vector2.new(center_x - half_width, center_y + half_height)
-                                item.PointD = Vector2.new(center_x + half_width, center_y + half_height)
-                            end
-                            Size(library.box)
-                            Size(library.black)
-                            library.box.Color = BlissfulSettings.Box_Color
-                            library.box.Visible = true
-                            library.black.Visible = true
-                        else
-                            library.box.Visible = false
-                            library.black.Visible = false
-                        end
-
-                        if tracersEnabled then
-                            if BlissfulSettings.Tracer_Origin == "Middle" then
-                                library.tracer.From = camera.ViewportSize * 0.5
-                                library.blacktracer.From = camera.ViewportSize * 0.5
-                            elseif BlissfulSettings.Tracer_Origin == "Bottom" then
-                                library.tracer.From = Vector2.new(camera.ViewportSize.X * 0.5, camera.ViewportSize.Y)
-                                library.blacktracer.From = Vector2.new(camera.ViewportSize.X * 0.5, camera.ViewportSize.Y)
-                            end
-                            if BlissfulSettings.Tracer_FollowMouse then
-                                library.tracer.From = Vector2.new(mouse.X, mouse.Y + 36)
-                                library.blacktracer.From = Vector2.new(mouse.X, mouse.Y + 36)
-                            end
-                            library.tracer.To = Vector2.new(center_x, center_y + half_height)
-                            library.blacktracer.To = Vector2.new(center_x, center_y + half_height)
-                            library.tracer.Color = BlissfulSettings.Tracer_Color
-                            library.tracer.Visible = true
-                            library.blacktracer.Visible = true
-                        else
-                            library.tracer.Visible = false
-                            library.blacktracer.Visible = false
-                        end
-
-                        if healthEspEnabled then
-                            local d = 2 * half_height
-                            local healthoffset = plr.Character.Humanoid.Health / plr.Character.Humanoid.MaxHealth * d
-                            local healthbar_x = center_x - half_width - 4
-                            local healthbar_top_y = center_y - half_height
-                            local healthbar_bottom_y = center_y + half_height
-                            
-                            library.greenhealth.From = Vector2.new(healthbar_x, healthbar_bottom_y)
-                            library.greenhealth.To = Vector2.new(healthbar_x, healthbar_bottom_y - healthoffset)
-                            library.healthbar.From = Vector2.new(healthbar_x, healthbar_bottom_y)
-                            library.healthbar.To = Vector2.new(healthbar_x, healthbar_top_y)
-                            
-                            local green = Color3.fromRGB(0, 255, 0)
-                            local red = Color3.fromRGB(255, 0, 0)
-                            library.greenhealth.Color = red:lerp(green, plr.Character.Humanoid.Health / plr.Character.Humanoid.MaxHealth)
-                            library.healthbar.Visible = true
-                            library.greenhealth.Visible = true
-                        else
-                            library.healthbar.Visible = false
-                            library.greenhealth.Visible = false
-                        end
-
-                        local tool = nil
-                        pcall(function()
-                            tool = plr.Character:FindFirstChildOfClass("Tool")
-                        end)
-                        
-                        if hotbarEspEnabled and hotbarDisplaySet.Text then
-                            if not library.hotbartext then
-                                local ht = NewText(hotbarSize, Color3.fromRGB(200, 200, 200))
-                                library.hotbartext = ht
-                            end
-                            if library.hotbartext then
-                                local ht = library.hotbartext
-                                ht.Size = hotbarSize
-                                local label = (tool and tool.Name) or ""
-                                ht.Text = label
-                                local yBottom = center_y + half_height
-                                local y = yBottom + math.max(1, margin - math.floor(hotbarSize * 0.35))
-                                ht.Position = Vector2.new(center_x, y)
-                                ht.Visible = (label ~= "")
-                            end
-                        elseif library.hotbartext then
-                            library.hotbartext.Visible = false
-                        end
-                        
-                        if hotbarEspEnabled and hotbarDisplaySet.Image and tool then
-                            ensureHotbarGui(plr.Character.HumanoidRootPart)
-                            if hotbarGui then
-                                local px = math.floor(math.clamp(half_width * 1.2, 26, 84))
-                                hotbarGui.Size = UDim2.fromOffset(px, px)
-                                local currName = tool.Name
-                                if currName ~= lastToolName then
-                                    lastToolName = currName
-                                    setViewportToTool(tool)
-                                end
-                            end
-                        else
-                            destroyHotbarGui()
-                        end
-
-                        local teamLabel = nil
-                        local teamObj = plr.Team
-                        if teamCheckEnabled and teamObj and teamObj.Name and teamObj.Name ~= "" then
-                            teamLabel = teamObj.Name
-                        elseif teamCheckEnabled and plr.TeamColor then
-                            teamLabel = tostring(plr.TeamColor)
-                        end
-                        
-                        if teamLabel and teamCheckEnabled then
-                            if not library.teamtext then
-                                local tt = NewText(teamSize, (teamColorEnabled and teamObj and teamObj.TeamColor.Color) or Color3.fromRGB(255, 255, 255))
-                                tt.Center = false
-                                library.teamtext = tt
-                            end
-                            if library.teamtext then
-                                local tt = library.teamtext
-                                tt.Size = teamSize
-                                tt.Text = teamLabel
-                                tt.Position = Vector2.new(
-                                    center_x + half_width + 4,
-                                    yTop + math.max(2, math.floor(teamSize * 0.3))
-                                )
-                                tt.Color = (teamColorEnabled and teamObj and teamObj.TeamColor.Color) or Color3.fromRGB(255, 255, 255)
-                                tt.Visible = true
-                            end
-                        elseif library.teamtext then
-                            library.teamtext.Visible = false
-                        end
-
-                    else
-                        for _, drawing in pairs(library) do
-                            if drawing and drawing.Visible then
-                                drawing.Visible = false
-                            end
-                        end
-                        destroyHotbarGui()
-                    end
-                else
-                    hideAll()
-                    if Players:FindFirstChild(plr.Name) == nil then
-                        for _, drawing in pairs(library) do
-                            pcall(function()
-                                if drawing and drawing.Remove then drawing:Remove() end
-                            end)
-                        end
-                        if data.SkeletonConnection then
-                            safeDisconnectConn(data.SkeletonConnection)
-                        end
-                        if data.SkeletonLimbs then
-                            for _, line in pairs(data.SkeletonLimbs) do
-                                pcall(function() line:Remove() end)
-                            end
-                        end
-                        trackedPlayers[plr] = nil
-                    end
-                end
-        end) -- end pcall
-        if not ok then hideAll() end
-    end -- end for plr
-end) -- end Heartbeat
-
-local _skeletonData = {}  -- [player] = { lines = {{line,part1,part2},...}, conn }
-
-local function skeletonIsAlive(p)
+------------------------------------------------------------
+-- Helpers
+------------------------------------------------------------
+local function isAlive(p)
     if not p or not p.Character then return false end
     local h = p.Character:FindFirstChildOfClass("Humanoid")
     return h and h.Health > 0
 end
 
-local function skeletonCreate(plr)
-    if plr == player then return end
-    if not plr or not plr.Character then return end
+------------------------------------------------------------
+-- Per-player drawing objects
+------------------------------------------------------------
+local function createPlayerDrawings(plr)
+    if plr == LocalPlayer then return end
+    if tracked[plr] then return end
+
+    tracked[plr] = {
+        -- Box (4 lines: top, bottom, left, right)
+        boxLines = {
+            NewLine(Config.BoxThickness, Config.BoxColor),
+            NewLine(Config.BoxThickness, Config.BoxColor),
+            NewLine(Config.BoxThickness, Config.BoxColor),
+            NewLine(Config.BoxThickness, Config.BoxColor),
+        },
+        -- Tracer
+        tracer = NewLine(Config.TracerThickness, Config.TracerColor),
+        -- Name
+        nameText = NewText(14, Color3.fromRGB(255, 255, 255)),
+        -- Health bar (background + fill)
+        healthBg = NewLine(3, Color3.fromRGB(0, 0, 0)),
+        healthFill = NewLine(2, Color3.fromRGB(0, 255, 0)),
+        -- Skeleton lines
+        skeletonLines = {},
+        skeletonParts = {},
+    }
+end
+
+local function destroyPlayerDrawings(plr)
+    local d = tracked[plr]
+    if not d then return end
     pcall(function()
-        local character = plr.Character
-        if not character:FindFirstChild("HumanoidRootPart") then return end
+        for _, ln in ipairs(d.boxLines or {}) do if ln then ln:Remove() end end
+        if d.tracer then d.tracer:Remove() end
+        if d.nameText then d.nameText:Remove() end
+        if d.healthBg then d.healthBg:Remove() end
+        if d.healthFill then d.healthFill:Remove() end
+        for _, ln in ipairs(d.skeletonLines or {}) do if ln then ln:Remove() end end
+    end)
+    tracked[plr] = nil
+end
 
-        -- clean old if exists
-        if _skeletonData[plr] then
-            pcall(function()
-                for _, d in ipairs(_skeletonData[plr].lines or {}) do
-                    if d.line then pcall(function() d.line:Remove() end) end
-                end
-            end)
-            if _skeletonData[plr].conn then
-                safeDisconnectConn(_skeletonData[plr].conn)
-            end
-            _skeletonData[plr] = nil
+------------------------------------------------------------
+-- Build skeleton bone pairs for a character
+------------------------------------------------------------
+local function buildSkeleton(plr)
+    local d = tracked[plr]
+    if not d then return end
+    -- Destroy old skeleton lines
+    for _, ln in ipairs(d.skeletonLines or {}) do
+        pcall(function() ln:Remove() end)
+    end
+    d.skeletonLines = {}
+    d.skeletonParts = {}
+
+    local char = plr.Character
+    if not char then return end
+
+    local head       = char:FindFirstChild("Head")
+    local torso      = char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso")
+    local lowerTorso = char:FindFirstChild("LowerTorso")
+    local leftArm    = char:FindFirstChild("LeftUpperArm") or char:FindFirstChild("Left Arm")
+    local rightArm   = char:FindFirstChild("RightUpperArm") or char:FindFirstChild("Right Arm")
+    local leftHand   = char:FindFirstChild("LeftHand") or char:FindFirstChild("LeftLowerArm")
+    local rightHand  = char:FindFirstChild("RightHand") or char:FindFirstChild("RightLowerArm")
+    local leftLeg    = char:FindFirstChild("LeftUpperLeg") or char:FindFirstChild("Left Leg")
+    local rightLeg   = char:FindFirstChild("RightUpperLeg") or char:FindFirstChild("Right Leg")
+    local leftFoot   = char:FindFirstChild("LeftFoot") or char:FindFirstChild("LeftLowerLeg")
+    local rightFoot  = char:FindFirstChild("RightFoot") or char:FindFirstChild("RightLowerLeg")
+
+    local pairs_ = {}
+    if head and torso then table.insert(pairs_, {head, torso}) end
+    if torso and lowerTorso then table.insert(pairs_, {torso, lowerTorso}) end
+    if torso and leftArm then table.insert(pairs_, {torso, leftArm}) end
+    if torso and rightArm then table.insert(pairs_, {torso, rightArm}) end
+    if leftArm and leftHand then table.insert(pairs_, {leftArm, leftHand}) end
+    if rightArm and rightHand then table.insert(pairs_, {rightArm, rightHand}) end
+    if (lowerTorso or torso) and leftLeg then table.insert(pairs_, {lowerTorso or torso, leftLeg}) end
+    if (lowerTorso or torso) and rightLeg then table.insert(pairs_, {lowerTorso or torso, rightLeg}) end
+    if leftLeg and leftFoot then table.insert(pairs_, {leftLeg, leftFoot}) end
+    if rightLeg and rightFoot then table.insert(pairs_, {rightLeg, rightFoot}) end
+
+    for _, pair in ipairs(pairs_) do
+        local ln = NewLine(2, Color3.fromRGB(255, 255, 255))
+        if ln then
+            table.insert(d.skeletonLines, ln)
+            table.insert(d.skeletonParts, pair)
         end
+    end
+end
 
-        _skeletonData[plr] = { lines = {} }
+------------------------------------------------------------
+-- Hide all drawings for a player
+------------------------------------------------------------
+local function hideAll(d)
+    if not d then return end
+    for _, ln in ipairs(d.boxLines or {}) do pcall(function() ln.Visible = false end) end
+    pcall(function() d.tracer.Visible = false end)
+    pcall(function() d.nameText.Visible = false end)
+    pcall(function() d.healthBg.Visible = false end)
+    pcall(function() d.healthFill.Visible = false end)
+    for _, ln in ipairs(d.skeletonLines or {}) do pcall(function() ln.Visible = false end) end
+end
 
-        -- Resolve parts (handles both R6 and R15)
-        local head       = character:FindFirstChild("Head")
-        local torso      = character:FindFirstChild("UpperTorso") or character:FindFirstChild("Torso")
-        local lowerTorso = character:FindFirstChild("LowerTorso")
-        local leftArm    = character:FindFirstChild("LeftUpperArm") or character:FindFirstChild("Left Arm")
-        local rightArm   = character:FindFirstChild("RightUpperArm") or character:FindFirstChild("Right Arm")
-        local leftHand   = character:FindFirstChild("LeftHand") or character:FindFirstChild("LeftLowerArm")
-        local rightHand  = character:FindFirstChild("RightHand") or character:FindFirstChild("RightLowerArm")
-        local leftLeg    = character:FindFirstChild("LeftUpperLeg") or character:FindFirstChild("Left Leg")
-        local rightLeg   = character:FindFirstChild("RightUpperLeg") or character:FindFirstChild("Right Leg")
-        local leftFoot   = character:FindFirstChild("LeftFoot") or character:FindFirstChild("LeftLowerLeg")
-        local rightFoot  = character:FindFirstChild("RightFoot") or character:FindFirstChild("RightLowerLeg")
-
-        local connections = {}
-        if head and torso then table.insert(connections, {head, torso}) end
-        if torso and lowerTorso then table.insert(connections, {torso, lowerTorso}) end
-        if torso and leftArm then table.insert(connections, {torso, leftArm}) end
-        if torso and rightArm then table.insert(connections, {torso, rightArm}) end
-        if leftArm and leftHand then table.insert(connections, {leftArm, leftHand}) end
-        if rightArm and rightHand then table.insert(connections, {rightArm, rightHand}) end
-        if (lowerTorso or torso) and leftLeg then table.insert(connections, {lowerTorso or torso, leftLeg}) end
-        if (lowerTorso or torso) and rightLeg then table.insert(connections, {lowerTorso or torso, rightLeg}) end
-        if leftLeg and leftFoot then table.insert(connections, {leftLeg, leftFoot}) end
-        if rightLeg and rightFoot then table.insert(connections, {rightLeg, rightFoot}) end
-
-        for _, conn in ipairs(connections) do
-            local p1, p2 = conn[1], conn[2]
-            if p1 and p2 then
-                pcall(function()
-                    local ln = NewLine(BlissfulSettings.Box_Thickness, Color3.fromRGB(255, 255, 255))
-                    if ln then
-                        ln.Visible = false
-                        table.insert(_skeletonData[plr].lines, { line = ln, part1 = p1, part2 = p2 })
-                    end
-                end)
-            end
-        end
-
-        -- Heartbeat updater for this player's skeleton
-        local conn
-        conn = RunService.Heartbeat:Connect(function()
-            pcall(function()
-                local sd = _skeletonData[plr]
-                if not sd then conn:Disconnect() return end
-                if not skeletonEspEnabled or not skeletonIsAlive(plr) then
-                    for _, d in ipairs(sd.lines) do
-                        pcall(function() d.line.Visible = false end)
-                    end
-                    return
+------------------------------------------------------------
+-- Master render loop (ONE Heartbeat connection for ALL)
+------------------------------------------------------------
+RunService.Heartbeat:Connect(function()
+    for plr, d in pairs(tracked) do
+        pcall(function()
+            if not isAlive(plr) then
+                hideAll(d)
+                -- cleanup if player left
+                if not Players:FindFirstChild(plr.Name) then
+                    destroyPlayerDrawings(plr)
                 end
-                local char = plr.Character
-                local localChar = player.Character
-                local localRoot = localChar and localChar:FindFirstChild("HumanoidRootPart")
-                local hrp = char and char:FindFirstChild("HumanoidRootPart")
-                if not hrp or not localRoot then return end
+                return
+            end
 
-                local dist = (hrp.Position - localRoot.Position).Magnitude
-                local alpha = math.clamp(1 - (dist / 500), 0.3, 1)
+            local char = plr.Character
+            local hrp = char:FindFirstChild("HumanoidRootPart")
+            local head = char:FindFirstChild("Head")
+            local humanoid = char:FindFirstChildOfClass("Humanoid")
+            if not hrp or not head or not humanoid then hideAll(d) return end
 
-                for _, d in ipairs(sd.lines) do
+            local hrpPos, onScreen = Camera:WorldToViewportPoint(hrp.Position)
+            if not onScreen then hideAll(d) return end
+
+            -- Distance
+            local localChar = LocalPlayer.Character
+            local localRoot = localChar and localChar:FindFirstChild("HumanoidRootPart")
+            if not localRoot then hideAll(d) return end
+            local dist = (hrp.Position - localRoot.Position).Magnitude
+            if dist > Config.MaxDistance then hideAll(d) return end
+
+            -- Projections for box/name/health
+            local topPos = Camera:WorldToViewportPoint(hrp.Position + Vector3.new(0, 3, 0))
+            local botPos = Camera:WorldToViewportPoint(hrp.Position - Vector3.new(0, 3, 0))
+            local height = math.abs(botPos.Y - topPos.Y)
+            local width = height / 2
+            local cx, cy = hrpPos.X, hrpPos.Y
+
+            ---- BOX ESP ----
+            if Config.BoxEnabled then
+                local bl = d.boxLines
+                -- top
+                bl[1].From = Vector2.new(cx - width, cy - height/2)
+                bl[1].To   = Vector2.new(cx + width, cy - height/2)
+                bl[1].Color = Config.BoxColor
+                bl[1].Visible = true
+                -- bottom
+                bl[2].From = Vector2.new(cx - width, cy + height/2)
+                bl[2].To   = Vector2.new(cx + width, cy + height/2)
+                bl[2].Color = Config.BoxColor
+                bl[2].Visible = true
+                -- left
+                bl[3].From = Vector2.new(cx - width, cy - height/2)
+                bl[3].To   = Vector2.new(cx - width, cy + height/2)
+                bl[3].Color = Config.BoxColor
+                bl[3].Visible = true
+                -- right
+                bl[4].From = Vector2.new(cx + width, cy - height/2)
+                bl[4].To   = Vector2.new(cx + width, cy + height/2)
+                bl[4].Color = Config.BoxColor
+                bl[4].Visible = true
+            else
+                for _, ln in ipairs(d.boxLines) do ln.Visible = false end
+            end
+
+            ---- NAME ESP ----
+            if Config.NameEnabled then
+                d.nameText.Text = plr.DisplayName or plr.Name
+                d.nameText.Position = Vector2.new(cx, cy - height/2 - 18)
+                d.nameText.Visible = true
+            else
+                d.nameText.Visible = false
+            end
+
+            ---- HEALTH ESP ----
+            if Config.HealthEnabled then
+                local hp = humanoid.Health / humanoid.MaxHealth
+                local barX = cx - width - 5
+                local barTop = cy - height/2
+                local barBot = cy + height/2
+                local barH = barBot - barTop
+
+                d.healthBg.From = Vector2.new(barX, barBot)
+                d.healthBg.To   = Vector2.new(barX, barTop)
+                d.healthBg.Visible = true
+
+                d.healthFill.From = Vector2.new(barX, barBot)
+                d.healthFill.To   = Vector2.new(barX, barBot - barH * hp)
+                d.healthFill.Color = Color3.fromRGB(255, 0, 0):Lerp(Color3.fromRGB(0, 255, 0), hp)
+                d.healthFill.Visible = true
+            else
+                d.healthBg.Visible = false
+                d.healthFill.Visible = false
+            end
+
+            ---- TRACERS ----
+            if Config.TracersEnabled then
+                local origin
+                if Config.TracerOrigin == "Middle" then
+                    origin = Camera.ViewportSize * 0.5
+                else
+                    origin = Vector2.new(Camera.ViewportSize.X * 0.5, Camera.ViewportSize.Y)
+                end
+                d.tracer.From = origin
+                d.tracer.To   = Vector2.new(cx, cy + height/2)
+                d.tracer.Color = Config.TracerColor
+                d.tracer.Visible = true
+            else
+                d.tracer.Visible = false
+            end
+
+            ---- SKELETON ESP ----
+            if Config.SkeletonEnabled then
+                -- Rebuild if no parts yet
+                if #d.skeletonParts == 0 then
+                    buildSkeleton(plr)
+                end
+                for i, pair in ipairs(d.skeletonParts) do
+                    local ln = d.skeletonLines[i]
                     pcall(function()
-                        local p1, p2, ln = d.part1, d.part2, d.line
-                        if p1 and p2 and p1.Parent and p2.Parent and ln then
-                            local s1, on1 = camera:WorldToViewportPoint(p1.Position)
-                            local s2, on2 = camera:WorldToViewportPoint(p2.Position)
+                        if pair[1] and pair[2] and pair[1].Parent and pair[2].Parent and ln then
+                            local s1, on1 = Camera:WorldToViewportPoint(pair[1].Position)
+                            local s2, on2 = Camera:WorldToViewportPoint(pair[2].Position)
                             if (on1 or on2) and s1.Z > 0 and s2.Z > 0 then
                                 ln.From = Vector2.new(s1.X, s1.Y)
                                 ln.To   = Vector2.new(s2.X, s2.Y)
-                                ln.Transparency = alpha
                                 ln.Visible = true
                             else
                                 ln.Visible = false
@@ -899,191 +418,72 @@ local function skeletonCreate(plr)
                         end
                     end)
                 end
-
-                if not Players:FindFirstChild(plr.Name) then
-                    safeDisconnectConn(conn)
+            else
+                for _, ln in ipairs(d.skeletonLines or {}) do
+                    pcall(function() ln.Visible = false end)
                 end
-            end)
+            end
         end)
-        _skeletonData[plr].conn = conn
-        -- also store on trackedPlayers for cleanup
-        if trackedPlayers[plr] then
-            trackedPlayers[plr].SkeletonConnection = conn
-        end
-    end)
-end
+    end
+end)
 
-local function skeletonRemove(plr)
-    local sd = _skeletonData[plr]
-    if not sd then return end
+------------------------------------------------------------
+-- Player tracking
+------------------------------------------------------------
+local function setupPlayer(plr)
+    if plr == LocalPlayer then return end
     pcall(function()
-        for _, d in ipairs(sd.lines or {}) do
-            if d.line then pcall(function() d.line:Remove() end) end
+        createPlayerDrawings(plr)
+        if plr.Character then
+            buildSkeleton(plr)
         end
-    end)
-    if sd.conn then safeDisconnectConn(sd.conn) end
-    _skeletonData[plr] = nil
-end
-
-local function DrawSkeletonESP(plr)
-    -- CharacterAdded hook so skeleton rebuilds on respawn
-    plr.CharacterAdded:Connect(function()
-        task.wait(0.5)
-        if skeletonEspEnabled then
-            pcall(skeletonCreate, plr)
-        end
-    end)
-    plr.CharacterRemoving:Connect(function()
-        pcall(skeletonRemove, plr)
-    end)
-    if plr.Character then
-        task.spawn(function()
+        plr.CharacterAdded:Connect(function()
             task.wait(0.5)
-            pcall(skeletonCreate, plr)
+            pcall(buildSkeleton, plr)
         end)
-    end
+    end)
 end
 
+for _, plr in ipairs(Players:GetPlayers()) do
+    pcall(setupPlayer, plr)
+end
+Players.PlayerAdded:Connect(function(plr)
+    pcall(setupPlayer, plr)
+end)
+Players.PlayerRemoving:Connect(function(plr)
+    pcall(destroyPlayerDrawings, plr)
+end)
 
+------------------------------------------------------------
+-- Public API
+------------------------------------------------------------
+function ESP:Init() end
 
-local function trackPlayer(newplr)
-    if newplr.Name ~= player.Name then
-        trackedPlayers[newplr] = trackedPlayers[newplr] or {}
-        coroutine.wrap(ESP)(newplr)
-        task.spawn(DrawSkeletonESP, newplr)
-    end
+function ESP:SetBoxEsp(state)
+    Config.BoxEnabled = state
 end
-
-local function onPlayerRemoving(rem)
-    local data = trackedPlayers[rem]
-    if data then
-        if data.SkeletonConnection then
-            safeDisconnectConn(data.SkeletonConnection)
-        end
-        if data.SkeletonLimbs then
-            for _, line in pairs(data.SkeletonLimbs) do
-                pcall(function()
-                    line:Remove()
-                end)
-            end
-        end
-        trackedPlayers[rem] = nil
-    end
+function ESP:SetNameEsp(state)
+    Config.NameEnabled = state
 end
-
-local PlayerESP = {
-    refreshAutoDig = refreshAutoDig
-}
-
-function PlayerESP:Init()
-    for _, v in pairs(Players:GetPlayers()) do
-        trackPlayer(v)
-    end
-    Players.PlayerAdded:Connect(trackPlayer)
-    Players.PlayerRemoving:Connect(onPlayerRemoving)
+function ESP:SetHealthEsp(state)
+    Config.HealthEnabled = state
 end
-
-function PlayerESP:InitAutomation()
-    local savedState = false
-    if savedState then
-        self:SetAutoItemBuffs(true)
-    end
+function ESP:SetTracers(state)
+    Config.TracersEnabled = state
 end
-
-function PlayerESP:SetBoxEsp(state)
-    boxEspEnabled = state
-end
-function PlayerESP:SetHealthEsp(state)
-    healthEspEnabled = state
-end
-function PlayerESP:SetTracers(state)
-    tracersEnabled = state
-end
-function PlayerESP:SetTeamCheck(state)
-    teamCheckEnabled = state
-end
-function PlayerESP:SetTeamColor(state)
-    teamColorEnabled = state
-end
-function PlayerESP:SetSkeletonEsp(state)
-    skeletonEspEnabled = state
+function ESP:SetSkeletonEsp(state)
+    Config.SkeletonEnabled = state
     if state then
-        for plr in pairs(trackedPlayers) do
-            pcall(skeletonCreate, plr)
+        for plr in pairs(tracked) do
+            pcall(buildSkeleton, plr)
         end
     else
-        for plr in pairs(_skeletonData) do
-            pcall(skeletonRemove, plr)
-        end
-    end
-end
-
-function PlayerESP:SetNameEsp(state)
-    nameEspEnabled = state
-end
-function PlayerESP:SetHotbarEsp(state)
-    hotbarEspEnabled = state
-    if not state then
-        for _, data in pairs(trackedPlayers) do
-            if data.destroyHotbarGui then
-                data.destroyHotbarGui()
+        for _, d in pairs(tracked) do
+            for _, ln in ipairs(d.skeletonLines or {}) do
+                pcall(function() ln.Visible = false end)
             end
         end
     end
 end
-function PlayerESP:SetHotbarDisplay(list)
-    local set = {}
-    if type(list) == "table" then
-        for _, name in ipairs(list) do
-            set[tostring(name)] = true
-        end
-    end
-    hotbarDisplaySet = set
-end
 
-function PlayerESP:SetAutoDigManual(state, isAutoFarmEnabled)
-    autoDigManualEnabled = state
-    refreshAutoDig(isAutoFarmEnabled)
-end
-
-function PlayerESP:SetAutoSprinkler(state)
-    autoSprinklerEnabled = state
-end
-
-function PlayerESP:SetAutoActive(enabled, interval, activeName)
-    local state = { enabled }
-    local threadRef = { nil }
-    
-    local function getAutoLoopState(name)
-        if not PlayerESP.ActiveStates then PlayerESP.ActiveStates = {} end
-        if not PlayerESP.ActiveStates[name] then
-            PlayerESP.ActiveStates[name] = { state = state, thread = threadRef }
-        end
-        return PlayerESP.ActiveStates[name]
-    end
-
-    local tracker = getAutoLoopState(activeName)
-
-    if enabled then
-        startAutoLoop(tracker.state, tracker.thread, interval, function()
-            firePlayerActives(activeName)
-        end)
-    else
-        stopAutoLoop(tracker.state, tracker.thread)
-    end
-end
-
-function PlayerESP:SetAutoItemBuffs(enabled)
-    autoBuffItemsState[1] = enabled
-    if enabled then
-        startAutoLoop(autoBuffItemsState, autoBuffItemsThread, 600, releaseBuffs)
-    else
-        stopAutoLoop(autoBuffItemsState, autoBuffItemsThread)
-    end
-end
-
-function PlayerESP:FireActive(activeName)
-    firePlayerActives(activeName)
-end
-
-return PlayerESP
+return ESP

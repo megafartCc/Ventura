@@ -25,7 +25,15 @@ M.AdminListEnabled = false
 M.AdminListOffset = Vector2.new(0,0)
 local ADMIN_GROUP_ID = 17180419
 
+-- Vehicle ESP settings
+M.VehBoxEnabled = false
+M.VehNameEnabled = false
+M.VehTracersEnabled = false
+M.VehHealthEnabled = false
+M.VehMaxDist = 600
+
 local tracked = {}
+local vehTracked = {}
 
 local function w2s(p)
     local v, on = Camera:WorldToViewportPoint(p)
@@ -434,6 +442,158 @@ RunService.Heartbeat:Connect(function()
     end
 end)
 
+-- ==================================================
+-- VEHICLE ESP
+-- ==================================================
+local function makeVeh(car)
+    if vehTracked[car] then return end
+    local d = {}
+    pcall(function()
+        d.box = {}
+        for i = 1, 4 do
+            local l = Drawing.new("Line")
+            l.Visible = false
+            l.Color = C3(0,200,255)
+            l.Thickness = 1
+            d.box[i] = l
+        end
+        d.tracer = Drawing.new("Line")
+        d.tracer.Visible = false
+        d.tracer.Color = C3(0,200,255)
+        d.tracer.Thickness = 1
+        d.name = Drawing.new("Text")
+        d.name.Visible = false
+        d.name.Color = C3(0,200,255)
+        d.name.Size = 14
+        d.name.Center = true
+        d.name.Outline = true
+        d.hpBg = Drawing.new("Line")
+        d.hpBg.Visible = false
+        d.hpBg.Color = C3(0,0,0)
+        d.hpBg.Thickness = 3
+        d.hpFill = Drawing.new("Line")
+        d.hpFill.Visible = false
+        d.hpFill.Thickness = 2
+    end)
+    vehTracked[car] = d
+end
+
+local function nukeVeh(car)
+    local d = vehTracked[car]
+    if not d then return end
+    pcall(function()
+        for _, l in ipairs(d.box or {}) do l:Remove() end
+        if d.tracer then d.tracer:Remove() end
+        if d.name then d.name:Remove() end
+        if d.hpBg then d.hpBg:Remove() end
+        if d.hpFill then d.hpFill:Remove() end
+    end)
+    vehTracked[car] = nil
+end
+
+local function hideVeh(d)
+    pcall(function()
+        for _, l in ipairs(d.box or {}) do l.Visible = false end
+        if d.tracer then d.tracer.Visible = false end
+        if d.name then d.name.Visible = false end
+        if d.hpBg then d.hpBg.Visible = false end
+        if d.hpFill then d.hpFill.Visible = false end
+    end)
+end
+
+local function getVehCenter(car)
+    local pp = car.PrimaryPart
+    if pp then return pp.Position end
+    local bp = car:FindFirstChildWhichIsA("BasePart", true)
+    return bp and bp.Position or nil
+end
+
+RunService.Heartbeat:Connect(function()
+    local anyVehOn = M.VehBoxEnabled or M.VehNameEnabled or M.VehTracersEnabled or M.VehHealthEnabled
+    if not anyVehOn then
+        for car, d in pairs(vehTracked) do hideVeh(d) end
+        return
+    end
+    local carsFolder = workspace:FindFirstChild("Cars")
+    if not carsFolder then return end
+    local me = LP.Character
+    local myR = me and me:FindFirstChild("HumanoidRootPart")
+    if not myR then return end
+    -- Track new cars
+    for _, car in ipairs(carsFolder:GetChildren()) do
+        if car:IsA("Model") and not vehTracked[car] then
+            makeVeh(car)
+        end
+    end
+    -- Render
+    for car, d in pairs(vehTracked) do
+        pcall(function()
+            if not car.Parent then nukeVeh(car) return end
+            local pos = getVehCenter(car)
+            if not pos then hideVeh(d) return end
+            local dist = (pos - myR.Position).Magnitude
+            if dist > M.VehMaxDist then hideVeh(d) return end
+            local sv, onS = Camera:WorldToViewportPoint(pos)
+            if not onS then hideVeh(d) return end
+            local tP = Camera:WorldToViewportPoint(pos + Vector3.new(0,4,0))
+            local bP = Camera:WorldToViewportPoint(pos - Vector3.new(0,2,0))
+            local h = math.abs(bP.Y - tP.Y)
+            local w = h * 1.2
+            local cx, cy = sv.X, sv.Y
+            if M.VehBoxEnabled then
+                d.box[1].From = V2(cx-w, cy-h/2); d.box[1].To = V2(cx+w, cy-h/2); d.box[1].Visible = true
+                d.box[2].From = V2(cx-w, cy+h/2); d.box[2].To = V2(cx+w, cy+h/2); d.box[2].Visible = true
+                d.box[3].From = V2(cx-w, cy-h/2); d.box[3].To = V2(cx-w, cy+h/2); d.box[3].Visible = true
+                d.box[4].From = V2(cx+w, cy-h/2); d.box[4].To = V2(cx+w, cy+h/2); d.box[4].Visible = true
+            else
+                for i=1,4 do d.box[i].Visible = false end
+            end
+            if M.VehNameEnabled then
+                local vName = car.Name:gsub("Vehicle", ""):gsub("%u", " %0"):sub(1,30)
+                d.name.Text = vName .. " [" .. math.floor(dist) .. "]"
+                d.name.Position = V2(cx, cy - h/2 - 18)
+                d.name.Visible = true
+            else
+                d.name.Visible = false
+            end
+            if M.VehTracersEnabled then
+                local ox = Camera.ViewportSize.X / 2
+                local oy = Camera.ViewportSize.Y
+                d.tracer.From = V2(ox, oy)
+                d.tracer.To = V2(cx, cy + h/2)
+                d.tracer.Visible = true
+            else
+                d.tracer.Visible = false
+            end
+            if M.VehHealthEnabled then
+                local hp = 1
+                pcall(function()
+                    local body = car:FindFirstChild("Body")
+                    if body then
+                        local hVal = body:FindFirstChild("Health") or car:FindFirstChild("Health")
+                        if hVal and hVal:IsA("NumberValue") then
+                            local maxH = body:FindFirstChild("MaxHealth") or car:FindFirstChild("MaxHealth")
+                            local maxV = maxH and maxH.Value or 100
+                            hp = math.clamp(hVal.Value / maxV, 0, 1)
+                        end
+                    end
+                end)
+                local bx = cx - w - 5
+                local bt = cy - h/2
+                local bb = cy + h/2
+                d.hpBg.From = V2(bx, bb); d.hpBg.To = V2(bx, bt); d.hpBg.Visible = true
+                d.hpFill.From = V2(bx, bb)
+                d.hpFill.To = V2(bx, bb - (bb-bt)*hp)
+                d.hpFill.Color = C3(255,0,0):Lerp(C3(0,255,0), hp)
+                d.hpFill.Visible = true
+            else
+                d.hpBg.Visible = false
+                d.hpFill.Visible = false
+            end
+        end)
+    end
+end)
+
 local function onPlr(plr)
     if plr == LP then return end
     pcall(function()
@@ -448,11 +608,11 @@ end
 for _, p in ipairs(Players:GetPlayers()) do pcall(onPlr, p) end
 Players.PlayerAdded:Connect(function(p)
     pcall(onPlr, p)
-    task.delay(1, function() pcall(refreshAdminList) end) -- re-scan when someone joins
+    task.delay(1, function() pcall(refreshAdminList) end)
 end)
 Players.PlayerRemoving:Connect(function(p)
     pcall(nuke, p)
-    task.delay(0.5, function() pcall(refreshAdminList) end) -- re-scan when someone leaves
+    task.delay(0.5, function() pcall(refreshAdminList) end)
 end)
 
 local API = {}
@@ -475,4 +635,8 @@ function API:SetSkeletonEsp(s)
         for p in pairs(tracked) do pcall(buildSkel, p) end
     end
 end
+function API:SetVehBoxEsp(s) M.VehBoxEnabled = s end
+function API:SetVehNameEsp(s) M.VehNameEnabled = s end
+function API:SetVehTracers(s) M.VehTracersEnabled = s end
+function API:SetVehHealthEsp(s) M.VehHealthEnabled = s end
 return API

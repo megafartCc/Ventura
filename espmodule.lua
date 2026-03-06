@@ -628,30 +628,56 @@ RunService.Heartbeat:Connect(function()
             end
             if M.VehTrunkEnabled then
                 local items = {}
+                local seen = {}
                 pcall(function()
+                    local skipNames = {
+                        Body = true, Lights = true, Wheels = true, Engine = true,
+                        Chassis = true, DriveSeat = true, Script = true, LocalScript = true,
+                        Configuration = true, Sound = true, Attachment = true,
+                        TrunkOpen = true, IsTrunkOpen = true, Health = true, MaxHealth = true,
+                        BodyKit = true, LIGHTS = true, Animations = true,
+                    }
+                    local function addItem(name)
+                        if not seen[name] then
+                            seen[name] = true
+                            table.insert(items, name)
+                        end
+                    end
+                    local function scanFolder(folder)
+                        if not folder then return end
+                        for _, child in ipairs(folder:GetChildren()) do
+                            if child:IsA("Tool") then
+                                addItem(child.Name)
+                            elseif child:IsA("ObjectValue") and child.Value then
+                                addItem(child.Value.Name or child.Name)
+                            elseif child:IsA("StringValue") then
+                                addItem(child.Value ~= "" and child.Value or child.Name)
+                            elseif child:IsA("Model") or child:IsA("Folder") then
+                                scanFolder(child)
+                            elseif not child:IsA("BasePart") and not child:IsA("Script")
+                                and not child:IsA("LocalScript") and not child:IsA("UIBase")
+                                and not child:IsA("Constraint") and not child:IsA("JointInstance")
+                                and not child:IsA("Attachment") and not child:IsA("Sound")
+                                and not skipNames[child.Name] and not skipNames[child.ClassName] then
+                                addItem(child.Name)
+                            end
+                        end
+                    end
+                    -- Check Body/TrunkSystem/[child folders]
                     local body = car:FindFirstChild("Body")
                     if body then
                         local ts = body:FindFirstChild("TrunkSystem")
-                        if ts then
-                            for _, trunk in ipairs(ts:GetChildren()) do
-                                if trunk:IsA("Model") or trunk:IsA("Folder") then
-                                    for _, item in ipairs(trunk:GetDescendants()) do
-                                        if item:IsA("Tool") then
-                                            table.insert(items, item.Name)
-                                        end
-                                    end
-                                end
-                            end
-                        end
+                        if ts then scanFolder(ts) end
+                        -- Also check Body/Trunk directly
+                        local bt = body:FindFirstChild("Trunk")
+                        if bt then scanFolder(bt) end
                     end
+                    -- Check car/Trunk directly
                     local trunkFolder = car:FindFirstChild("Trunk")
-                    if trunkFolder then
-                        for _, item in ipairs(trunkFolder:GetChildren()) do
-                            if item:IsA("Tool") then
-                                table.insert(items, item.Name)
-                            end
-                        end
-                    end
+                    if trunkFolder then scanFolder(trunkFolder) end
+                    -- Check car/TrunkSystem directly
+                    local ts2 = car:FindFirstChild("TrunkSystem")
+                    if ts2 then scanFolder(ts2) end
                 end)
                 if #items > 0 then
                     d.trunkLabel.Text = "[" .. #items .. "] " .. table.concat(items, ", ")

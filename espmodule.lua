@@ -14,6 +14,7 @@ M.HealthEnabled = false
 M.TracersEnabled = false
 M.SkeletonEnabled = false
 M.TeamEnabled = false
+M.HeldItemEnabled = false
 M.MaxDist = 500
 M.AdminEnabled = false
 M.AdminBoxEnabled = true
@@ -21,6 +22,7 @@ M.AdminNameEnabled = true
 M.AdminTracersEnabled = true
 M.AdminSkeletonEnabled = true
 M.AdminTeamEnabled = true
+M.AdminHeldItemEnabled = true
 M.AdminListEnabled = false
 M.AdminListOffset = Vector2.new(0,0)
 local ADMIN_GROUP_ID = 17180419
@@ -30,6 +32,7 @@ M.VehBoxEnabled = false
 M.VehNameEnabled = false
 M.VehTracersEnabled = false
 M.VehHealthEnabled = false
+M.VehTrunkEnabled = false
 M.VehMaxDist = 600
 
 local tracked = {}
@@ -137,6 +140,13 @@ local function make(plr)
         d.skel = {}
         d.skelBuilt = false
 
+        d.heldItem = Drawing.new("Text")
+        d.heldItem.Visible = false
+        d.heldItem.Color = C3(255,200,0)
+        d.heldItem.Size = 13
+        d.heldItem.Center = true
+        d.heldItem.Outline = true
+
         d.tag = nil -- reserved for future labels
     end)
     tracked[plr] = d
@@ -152,6 +162,7 @@ local function nuke(plr)
         if d.team then d.team:Remove() end
         if d.hpBg then d.hpBg:Remove() end
         if d.hpFill then d.hpFill:Remove() end
+        if d.heldItem then d.heldItem:Remove() end
         for _, l in ipairs(d.skel or {}) do l:Remove() end
     end)
     tracked[plr] = nil
@@ -192,6 +203,7 @@ local function hideD(d)
         if d.team then d.team.Visible = false end
         if d.hpBg then d.hpBg.Visible = false end
         if d.hpFill then d.hpFill.Visible = false end
+        if d.heldItem then d.heldItem.Visible = false end
         for _, l in ipairs(d.skel or {}) do l.Visible = false end
     end)
 end
@@ -328,6 +340,7 @@ RunService.Heartbeat:Connect(function()
             local teamOn  = adm and M.AdminTeamEnabled    or M.TeamEnabled
             local tracersOn = adm and M.AdminTracersEnabled or M.TracersEnabled
             local skelOn  = adm and M.AdminSkeletonEnabled or M.SkeletonEnabled
+            local heldItemOn = adm and M.AdminHeldItemEnabled or M.HeldItemEnabled
 
             if boxOn then
                 for i=1,4 do d.box[i].Color = baseColor end
@@ -422,6 +435,19 @@ RunService.Heartbeat:Connect(function()
                     pcall(function() l.Visible = false end)
                 end
             end
+
+            if heldItemOn then
+                local tool = char:FindFirstChildWhichIsA("Tool")
+                if tool then
+                    d.heldItem.Text = tool.Name
+                    d.heldItem.Position = V2(cx, cy + h/2 + 4)
+                    d.heldItem.Visible = true
+                else
+                    d.heldItem.Visible = false
+                end
+            else
+                d.heldItem.Visible = false
+            end
         end)
     end
     if M.AdminListEnabled then
@@ -474,6 +500,12 @@ local function makeVeh(car)
         d.hpFill = Drawing.new("Line")
         d.hpFill.Visible = false
         d.hpFill.Thickness = 2
+        d.trunkLabel = Drawing.new("Text")
+        d.trunkLabel.Visible = false
+        d.trunkLabel.Color = C3(255, 180, 50)
+        d.trunkLabel.Size = 12
+        d.trunkLabel.Center = true
+        d.trunkLabel.Outline = true
     end)
     vehTracked[car] = d
 end
@@ -487,6 +519,7 @@ local function nukeVeh(car)
         if d.name then d.name:Remove() end
         if d.hpBg then d.hpBg:Remove() end
         if d.hpFill then d.hpFill:Remove() end
+        if d.trunkLabel then d.trunkLabel:Remove() end
     end)
     vehTracked[car] = nil
 end
@@ -498,6 +531,7 @@ local function hideVeh(d)
         if d.name then d.name.Visible = false end
         if d.hpBg then d.hpBg.Visible = false end
         if d.hpFill then d.hpFill.Visible = false end
+        if d.trunkLabel then d.trunkLabel.Visible = false end
     end)
 end
 
@@ -509,7 +543,7 @@ local function getVehCenter(car)
 end
 
 RunService.Heartbeat:Connect(function()
-    local anyVehOn = M.VehBoxEnabled or M.VehNameEnabled or M.VehTracersEnabled or M.VehHealthEnabled
+    local anyVehOn = M.VehBoxEnabled or M.VehNameEnabled or M.VehTracersEnabled or M.VehHealthEnabled or M.VehTrunkEnabled
     if not anyVehOn then
         for car, d in pairs(vehTracked) do hideVeh(d) end
         return
@@ -549,8 +583,10 @@ RunService.Heartbeat:Connect(function()
                 for i=1,4 do d.box[i].Visible = false end
             end
             if M.VehNameEnabled then
-                local vName = car.Name:gsub("Vehicle", ""):gsub("%u", " %0"):sub(1,30)
-                d.name.Text = vName .. " [" .. math.floor(dist) .. "]"
+                local rawName = car.Name
+                local owner = rawName:match("(.+)Vehicle$") or rawName
+                local vName = rawName:gsub("Vehicle$", ""):gsub("(%u)", " %1"):match("^%s*(.-)%s*$") or rawName
+                d.name.Text = vName .. " [" .. owner .. "]"
                 d.name.Position = V2(cx, cy - h/2 - 18)
                 d.name.Visible = true
             else
@@ -589,6 +625,47 @@ RunService.Heartbeat:Connect(function()
             else
                 d.hpBg.Visible = false
                 d.hpFill.Visible = false
+            end
+            if M.VehTrunkEnabled then
+                local items = {}
+                pcall(function()
+                    local body = car:FindFirstChild("Body")
+                    if body then
+                        local ts = body:FindFirstChild("TrunkSystem")
+                        if ts then
+                            for _, trunk in ipairs(ts:GetChildren()) do
+                                if trunk:IsA("Model") or trunk:IsA("Folder") then
+                                    for _, item in ipairs(trunk:GetDescendants()) do
+                                        if item:IsA("Tool") then
+                                            table.insert(items, item.Name)
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                    end
+                    local trunkFolder = car:FindFirstChild("Trunk")
+                    if trunkFolder then
+                        for _, item in ipairs(trunkFolder:GetChildren()) do
+                            if item:IsA("Tool") then
+                                table.insert(items, item.Name)
+                            end
+                        end
+                    end
+                end)
+                if #items > 0 then
+                    d.trunkLabel.Text = "[" .. #items .. "] " .. table.concat(items, ", ")
+                    d.trunkLabel.Color = C3(255, 120, 50)
+                    d.trunkLabel.Position = V2(cx, cy + h/2 + 4)
+                    d.trunkLabel.Visible = true
+                else
+                    d.trunkLabel.Text = "[empty]"
+                    d.trunkLabel.Color = C3(100, 255, 100)
+                    d.trunkLabel.Position = V2(cx, cy + h/2 + 4)
+                    d.trunkLabel.Visible = true
+                end
+            else
+                d.trunkLabel.Visible = false
             end
         end)
     end
@@ -639,4 +716,7 @@ function API:SetVehBoxEsp(s) M.VehBoxEnabled = s end
 function API:SetVehNameEsp(s) M.VehNameEnabled = s end
 function API:SetVehTracers(s) M.VehTracersEnabled = s end
 function API:SetVehHealthEsp(s) M.VehHealthEnabled = s end
+function API:SetVehTrunkEsp(s) M.VehTrunkEnabled = s end
+function API:SetHeldItemEsp(s) M.HeldItemEnabled = s end
+function API:SetAdminHeldItem(s) M.AdminHeldItemEnabled = s end
 return API

@@ -474,7 +474,7 @@ local function makeVeh(car)
     local d = {}
     pcall(function()
         d.box = {}
-        for i = 1, 4 do
+        for i = 1, 12 do
             local l = Drawing.new("Line")
             l.Visible = false
             l.Color = C3(0,200,255)
@@ -530,14 +530,19 @@ local function getVehCenter(car)
     if pp then return pp.Position end
     local bp = car:FindFirstChildWhichIsA("BasePart", true)
     if bp then return bp.Position end
-    -- Fallback for streamed models
     local ok, cf = pcall(function() return car:GetPivot() end)
     if ok and cf then return cf.Position end
     return nil
 end
 
+-- 3D box: project 8 corners of bounding box, draw 12 edges
+local VEH_EDGES = {
+    {1,2},{2,3},{3,4},{4,1}, -- top face
+    {5,6},{6,7},{7,8},{8,5}, -- bottom face
+    {1,5},{2,6},{3,7},{4,8}, -- vertical pillars
+}
+
 local function getVehDisplayName(car)
-    -- Try Body/Info/CarModel first (Ventura game structure)
     local ok, result = pcall(function()
         local body = car:FindFirstChild("Body")
         if not body then return nil end
@@ -556,10 +561,44 @@ local function getVehDisplayName(car)
         return nil
     end)
     if ok and result then return result end
-    -- Fallback: parse from model name like "UsernameVehicle"
     local rawName = car.Name
     local owner = rawName:match("(.+)Vehicle$") or rawName
     return owner
+end
+
+local function getVehHealth(car)
+    -- Average wheel Health attributes (FL, FR, RL, RR)
+    local total, count = 0, 0
+    local ok = pcall(function()
+        local wheels = car:FindFirstChild("Wheels")
+        if wheels then
+            for _, wh in ipairs(wheels:GetChildren()) do
+                local hp = wh:GetAttribute("Health")
+                if hp and type(hp) == "number" then
+                    total = total + hp
+                    count = count + 1
+                end
+            end
+        end
+    end)
+    if ok and count > 0 then
+        return math.clamp(total / count, 0, 1)
+    end
+    -- Fallback: Body/Health NumberValue
+    local ok2, hp2 = pcall(function()
+        local body = car:FindFirstChild("Body")
+        if body then
+            local hVal = body:FindFirstChild("Health") or car:FindFirstChild("Health")
+            if hVal and hVal:IsA("NumberValue") then
+                local maxH = body:FindFirstChild("MaxHealth") or car:FindFirstChild("MaxHealth")
+                local maxV = maxH and maxH.Value or 100
+                return math.clamp(hVal.Value / maxV, 0, 1)
+            end
+        end
+        return nil
+    end)
+    if ok2 and hp2 then return hp2 end
+    return 1
 end
 
 RunService.Heartbeat:Connect(function()
@@ -589,22 +628,75 @@ RunService.Heartbeat:Connect(function()
             if dist > M.VehMaxDist then hideVeh(d) return end
             local sv, onS = Camera:WorldToViewportPoint(pos)
             if not onS then hideVeh(d) return end
-            local tP = Camera:WorldToViewportPoint(pos + Vector3.new(0,4,0))
-            local bP = Camera:WorldToViewportPoint(pos - Vector3.new(0,2,0))
-            local h = math.abs(bP.Y - tP.Y)
-            local w = h * 1.2
-            local cx, cy = sv.X, sv.Y
-            if M.VehBoxEnabled then
-                d.box[1].From = V2(cx-w, cy-h/2); d.box[1].To = V2(cx+w, cy-h/2); d.box[1].Visible = true
-                d.box[2].From = V2(cx-w, cy+h/2); d.box[2].To = V2(cx+w, cy+h/2); d.box[2].Visible = true
-                d.box[3].From = V2(cx-w, cy-h/2); d.box[3].To = V2(cx-w, cy+h/2); d.box[3].Visible = true
-                d.box[4].From = V2(cx+w, cy-h/2); d.box[4].To = V2(cx+w, cy+h/2); d.box[4].Visible = true
+
+            -- 3D bounding box
+            local boxCf, boxSz
+            pcall(function() boxCf, boxSz = car:GetBoundingBox() end)
+
+            local screenMinY, screenMaxY, screenCx = sv.Y, sv.Y, sv.X
+
+            if M.VehBoxEnabled and boxCf and boxSz then
+                local hx, hy, hz = boxSz.X/2, boxSz.Y/2, boxSz.Z/2
+                local corners3D = {
+                    boxCf * Vector3.new(-hx,  hy, -hz),
+                    boxCf * Vector3.new( hx,  hy, -hz),
+                    boxCf * Vector3.new( hx,  hy,  hz),
+                    boxCf * Vector3.new(-hx,  hy,  hz),
+                    boxCf * Vector3.new(-hx, -hy, -hz),
+                    boxCf * Vector3.new( hx, -hy, -hz),
+                    boxCf * Vector3.new( hx, -hy,  hz),
+                    boxCf * Vector3.new(-hx, -hy,  hz),
+                }
+                local corners2D = {}
+                local anyVisible = false
+                local minSY, maxSY, sumX, cntX = math.huge, -math.huge, 0, 0
+                for i, c3 in ipairs(corners3D) do
+                    local v3, on2 = Camera:WorldToViewportPoint(c3)
+                    corners2D[i] = { x = v3.X, y = v3.Y, vis = on2 and v3.Z > 0 }
+                    if corners2D[i].vis then
+                        anyVisible = true
+                        if v3.Y < minSY then minSY = v3.Y end
+                        if v3.Y > maxSY then maxSY = v3.Y end
+                        sumX = sumX + v3.X
+                        cntX = cntX + 1
+                    end
+                end
+                if anyVisible then
+                    screenMinY = minSY
+                    screenMaxY = maxSY
+                    if cntX > 0 then screenCx = sumX / cntX end
+                    for i, edge in ipairs(VEH_EDGES) do
+                        local a, b = corners2D[edge[1]], corners2D[edge[2]]
+                        if a.vis or b.vis then
+                            d.box[i].From = V2(a.x, a.y)
+                            d.box[i].To = V2(b.x, b.y)
+                            d.box[i].Visible = true
+                        else
+                            d.box[i].Visible = false
+                        end
+                    end
+                else
+                    for i = 1, 12 do d.box[i].Visible = false end
+                end
+            elseif M.VehBoxEnabled then
+                -- Fallback 2D box if GetBoundingBox fails
+                local tP = Camera:WorldToViewportPoint(pos + Vector3.new(0,4,0))
+                local bP = Camera:WorldToViewportPoint(pos - Vector3.new(0,2,0))
+                local h = math.abs(bP.Y - tP.Y)
+                local w = h * 1.2
+                screenMinY = sv.Y - h/2
+                screenMaxY = sv.Y + h/2
+                d.box[1].From = V2(sv.X-w, sv.Y-h/2); d.box[1].To = V2(sv.X+w, sv.Y-h/2); d.box[1].Visible = true
+                d.box[2].From = V2(sv.X-w, sv.Y+h/2); d.box[2].To = V2(sv.X+w, sv.Y+h/2); d.box[2].Visible = true
+                d.box[3].From = V2(sv.X-w, sv.Y-h/2); d.box[3].To = V2(sv.X-w, sv.Y+h/2); d.box[3].Visible = true
+                d.box[4].From = V2(sv.X+w, sv.Y-h/2); d.box[4].To = V2(sv.X+w, sv.Y+h/2); d.box[4].Visible = true
+                for i = 5, 12 do d.box[i].Visible = false end
             else
-                for i=1,4 do d.box[i].Visible = false end
+                for i = 1, 12 do d.box[i].Visible = false end
             end
             if M.VehNameEnabled then
                 d.name.Text = getVehDisplayName(car)
-                d.name.Position = V2(cx, cy - h/2 - 18)
+                d.name.Position = V2(screenCx, screenMinY - 18)
                 d.name.Visible = true
             else
                 d.name.Visible = false
@@ -613,27 +705,17 @@ RunService.Heartbeat:Connect(function()
                 local ox = Camera.ViewportSize.X / 2
                 local oy = Camera.ViewportSize.Y
                 d.tracer.From = V2(ox, oy)
-                d.tracer.To = V2(cx, cy + h/2)
+                d.tracer.To = V2(screenCx, screenMaxY)
                 d.tracer.Visible = true
             else
                 d.tracer.Visible = false
             end
             if M.VehHealthEnabled then
-                local hp = 1
-                pcall(function()
-                    local body = car:FindFirstChild("Body")
-                    if body then
-                        local hVal = body:FindFirstChild("Health") or car:FindFirstChild("Health")
-                        if hVal and hVal:IsA("NumberValue") then
-                            local maxH = body:FindFirstChild("MaxHealth") or car:FindFirstChild("MaxHealth")
-                            local maxV = maxH and maxH.Value or 100
-                            hp = math.clamp(hVal.Value / maxV, 0, 1)
-                        end
-                    end
-                end)
-                local bx = cx - w - 5
-                local bt = cy - h/2
-                local bb = cy + h/2
+                local hp = getVehHealth(car)
+                local bx = screenCx - 30
+                local bt = screenMinY
+                local bb = screenMaxY
+                if bb - bt < 10 then bb = bt + 10 end
                 d.hpBg.From = V2(bx, bb); d.hpBg.To = V2(bx, bt); d.hpBg.Visible = true
                 d.hpFill.From = V2(bx, bb)
                 d.hpFill.To = V2(bx, bb - (bb-bt)*hp)

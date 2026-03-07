@@ -31,7 +31,6 @@ M.VehBoxEnabled = false
 M.VehNameEnabled = false
 M.VehTracersEnabled = false
 M.VehHealthEnabled = false
-M.VehTrunkEnabled = false
 M.VehMaxDist = 600
 
 local tracked = {}
@@ -499,12 +498,6 @@ local function makeVeh(car)
         d.hpFill = Drawing.new("Line")
         d.hpFill.Visible = false
         d.hpFill.Thickness = 2
-        d.trunkLabel = Drawing.new("Text")
-        d.trunkLabel.Visible = false
-        d.trunkLabel.Color = C3(255, 180, 50)
-        d.trunkLabel.Size = 12
-        d.trunkLabel.Center = true
-        d.trunkLabel.Outline = true
     end)
     vehTracked[car] = d
 end
@@ -518,7 +511,6 @@ local function nukeVeh(car)
         if d.name then d.name:Remove() end
         if d.hpBg then d.hpBg:Remove() end
         if d.hpFill then d.hpFill:Remove() end
-        if d.trunkLabel then d.trunkLabel:Remove() end
     end)
     vehTracked[car] = nil
 end
@@ -530,7 +522,6 @@ local function hideVeh(d)
         if d.name then d.name.Visible = false end
         if d.hpBg then d.hpBg.Visible = false end
         if d.hpFill then d.hpFill.Visible = false end
-        if d.trunkLabel then d.trunkLabel.Visible = false end
     end)
 end
 
@@ -542,7 +533,7 @@ local function getVehCenter(car)
 end
 
 RunService.Heartbeat:Connect(function()
-    local anyVehOn = M.VehBoxEnabled or M.VehNameEnabled or M.VehTracersEnabled or M.VehHealthEnabled or M.VehTrunkEnabled
+    local anyVehOn = M.VehBoxEnabled or M.VehNameEnabled or M.VehTracersEnabled or M.VehHealthEnabled
     if not anyVehOn then
         for car, d in pairs(vehTracked) do hideVeh(d) end
         return
@@ -625,73 +616,6 @@ RunService.Heartbeat:Connect(function()
                 d.hpBg.Visible = false
                 d.hpFill.Visible = false
             end
-            if M.VehTrunkEnabled then
-                local items = {}
-                local seen = {}
-                pcall(function()
-                    local skipNames = {
-                        Body = true, Lights = true, Wheels = true, Engine = true,
-                        Chassis = true, DriveSeat = true, Script = true, LocalScript = true,
-                        Configuration = true, Sound = true, Attachment = true,
-                        TrunkOpen = true, IsTrunkOpen = true, Health = true, MaxHealth = true,
-                        BodyKit = true, LIGHTS = true, Animations = true,
-                    }
-                    local function addItem(name)
-                        if not seen[name] then
-                            seen[name] = true
-                            table.insert(items, name)
-                        end
-                    end
-                    local function scanFolder(folder)
-                        if not folder then return end
-                        for _, child in ipairs(folder:GetChildren()) do
-                            if child:IsA("Tool") then
-                                addItem(child.Name)
-                            elseif child:IsA("ObjectValue") and child.Value then
-                                addItem(child.Value.Name or child.Name)
-                            elseif child:IsA("StringValue") then
-                                addItem(child.Value ~= "" and child.Value or child.Name)
-                            elseif child:IsA("Model") or child:IsA("Folder") then
-                                scanFolder(child)
-                            elseif not child:IsA("BasePart") and not child:IsA("Script")
-                                and not child:IsA("LocalScript") and not child:IsA("UIBase")
-                                and not child:IsA("Constraint") and not child:IsA("JointInstance")
-                                and not child:IsA("Attachment") and not child:IsA("Sound")
-                                and not skipNames[child.Name] and not skipNames[child.ClassName] then
-                                addItem(child.Name)
-                            end
-                        end
-                    end
-                    -- Check Body/TrunkSystem/[child folders]
-                    local body = car:FindFirstChild("Body")
-                    if body then
-                        local ts = body:FindFirstChild("TrunkSystem")
-                        if ts then scanFolder(ts) end
-                        -- Also check Body/Trunk directly
-                        local bt = body:FindFirstChild("Trunk")
-                        if bt then scanFolder(bt) end
-                    end
-                    -- Check car/Trunk directly
-                    local trunkFolder = car:FindFirstChild("Trunk")
-                    if trunkFolder then scanFolder(trunkFolder) end
-                    -- Check car/TrunkSystem directly
-                    local ts2 = car:FindFirstChild("TrunkSystem")
-                    if ts2 then scanFolder(ts2) end
-                end)
-                if #items > 0 then
-                    d.trunkLabel.Text = "[" .. #items .. "] " .. table.concat(items, ", ")
-                    d.trunkLabel.Color = C3(255, 120, 50)
-                    d.trunkLabel.Position = V2(cx, cy + h/2 + 4)
-                    d.trunkLabel.Visible = true
-                else
-                    d.trunkLabel.Text = "[empty]"
-                    d.trunkLabel.Color = C3(100, 255, 100)
-                    d.trunkLabel.Position = V2(cx, cy + h/2 + 4)
-                    d.trunkLabel.Visible = true
-                end
-            else
-                d.trunkLabel.Visible = false
-            end
         end)
     end
 end)
@@ -741,7 +665,7 @@ function API:SetVehBoxEsp(s) M.VehBoxEnabled = s end
 function API:SetVehNameEsp(s) M.VehNameEnabled = s end
 function API:SetVehTracers(s) M.VehTracersEnabled = s end
 function API:SetVehHealthEsp(s) M.VehHealthEnabled = s end
-function API:SetVehTrunkEsp(s) M.VehTrunkEnabled = s end
+function API:SetVehTrunkEsp(_) end
 function API:SetHeldItemEsp(s) M.HeldItemEnabled = s end
 function API:SetAdminHeldItem(s) M.AdminHeldItemEnabled = s end
 return API

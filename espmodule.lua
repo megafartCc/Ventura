@@ -528,10 +528,159 @@ local function hideVeh(d)
 end
 
 local function getVehCenter(car)
+    if not car then return nil end
+    local body = car:FindFirstChild("Body")
+    if body then
+        if body:IsA("BasePart") then
+            return body.Position
+        end
+        if body:IsA("Model") then
+            if body.PrimaryPart then
+                return body.PrimaryPart.Position
+            end
+            local driveSeat = body:FindFirstChild("DriveSeat", true)
+            if driveSeat and driveSeat:IsA("BasePart") then
+                return driveSeat.Position
+            end
+            local bodyPart = body:FindFirstChildWhichIsA("BasePart", true)
+            if bodyPart then
+                return bodyPart.Position
+            end
+        end
+    end
+
+    local seat = car:FindFirstChild("DriveSeat", true)
+    if seat and seat:IsA("BasePart") then
+        return seat.Position
+    end
+
     local pp = car.PrimaryPart
     if pp then return pp.Position end
     local bp = car:FindFirstChildWhichIsA("BasePart", true)
     return bp and bp.Position or nil
+end
+
+local function trimStr(s)
+    return (tostring(s or "")):gsub("^%s+", ""):gsub("%s+$", "")
+end
+
+local function readVehInfoField(info, key)
+    if not info then return nil end
+    local node = info:FindFirstChild(key)
+    if node then
+        if node:IsA("StringValue") then
+            local v = trimStr(node.Value)
+            if v ~= "" then return v end
+        elseif node:IsA("ObjectValue") then
+            local obj = node.Value
+            if obj then
+                local v = trimStr(obj.Name)
+                if v ~= "" then return v end
+            end
+        elseif node:IsA("IntValue") or node:IsA("NumberValue") then
+            return tostring(node.Value)
+        end
+    end
+    local ok, attr = pcall(function()
+        return info:GetAttribute(key)
+    end)
+    if ok and attr ~= nil then
+        local v = trimStr(attr)
+        if v ~= "" then return v end
+    end
+    return nil
+end
+
+local function isVehicleModel(car)
+    if not (car and car:IsA("Model")) then
+        return false
+    end
+    local body = car:FindFirstChild("Body")
+    if body then
+        local info = body:FindFirstChild("Info")
+        if info and (info:FindFirstChild("CarModel") or info:FindFirstChild("Owner")) then
+            return true
+        end
+        if body:FindFirstChild("DriveSeat", true) then
+            return true
+        end
+    end
+    if car:FindFirstChild("DriveSeat", true) and car:FindFirstChild("A-Chassis_Tune", true) then
+        return true
+    end
+    if car:FindFirstChild("Wheels", true) and car:FindFirstChild("A-Chassis_Tune", true) then
+        return true
+    end
+    return false
+end
+
+local VEH_CONTAINER_NAMES = {
+    "Cars",
+    "Vehicles",
+    "PlayerVehicles",
+    "PlayerCars",
+    "SpawnedVehicles",
+    "SpawnedCars",
+}
+
+local function gatherVehicleModels()
+    local list, seen = {}, {}
+    local function push(car)
+        if car and not seen[car] and isVehicleModel(car) then
+            seen[car] = true
+            table.insert(list, car)
+        end
+    end
+
+    for _, name in ipairs(VEH_CONTAINER_NAMES) do
+        local container = workspace:FindFirstChild(name)
+        if container then
+            for _, child in ipairs(container:GetChildren()) do
+                push(child)
+            end
+        end
+    end
+
+    if #list == 0 then
+        for _, child in ipairs(workspace:GetChildren()) do
+            if child:IsA("Model") then
+                push(child)
+            elseif child:IsA("Folder") then
+                local n = string.lower(child.Name)
+                if n:find("car", 1, true) or n:find("vehicle", 1, true) then
+                    for _, nested in ipairs(child:GetChildren()) do
+                        push(nested)
+                    end
+                end
+            end
+        end
+    end
+
+    return list
+end
+
+local function getVehDisplayText(car)
+    local body = car and car:FindFirstChild("Body")
+    local info = body and body:FindFirstChild("Info")
+
+    local modelName = readVehInfoField(info, "CarModel")
+    local ownerName = readVehInfoField(info, "Owner")
+
+    if not ownerName then
+        ownerName = trimStr((car and car.Name or ""):match("(.+)Vehicle$"))
+    end
+    if not modelName or modelName == "" then
+        local rawName = car and car.Name or "Vehicle"
+        modelName = trimStr(rawName:gsub("Vehicle$", ""):gsub("(%u)", " %1"))
+        if modelName == "" then
+            modelName = rawName
+        end
+    end
+
+    if ownerName and ownerName ~= "" then
+        return modelName .. " [" .. ownerName .. "]"
+    end
+    return modelName
 end
 
 local function normalizeVehKey(name)
@@ -788,21 +937,30 @@ RunService.Heartbeat:Connect(function()
         for car, d in pairs(vehTracked) do hideVeh(d) end
         return
     end
-    local carsFolder = workspace:FindFirstChild("Cars")
-    if not carsFolder then return end
+    local vehicles = gatherVehicleModels()
+    if #vehicles == 0 then
+        for car, d in pairs(vehTracked) do
+            if not car.Parent then
+                nukeVeh(car)
+            else
+                hideVeh(d)
+            end
+        end
+        return
+    end
     local me = LP.Character
     local myR = me and me:FindFirstChild("HumanoidRootPart")
     if not myR then return end
     -- Track new cars
-    for _, car in ipairs(carsFolder:GetChildren()) do
-        if car:IsA("Model") and not vehTracked[car] then
+    for _, car in ipairs(vehicles) do
+        if not vehTracked[car] then
             makeVeh(car)
         end
     end
     -- Render
     for car, d in pairs(vehTracked) do
         pcall(function()
-            if not car.Parent then nukeVeh(car) return end
+            if not car.Parent or not isVehicleModel(car) then nukeVeh(car) return end
             local pos = getVehCenter(car)
             if not pos then hideVeh(d) return end
             local dist = (pos - myR.Position).Magnitude
@@ -823,10 +981,7 @@ RunService.Heartbeat:Connect(function()
                 for i=1,4 do d.box[i].Visible = false end
             end
             if M.VehNameEnabled then
-                local rawName = car.Name
-                local owner = rawName:match("(.+)Vehicle$") or rawName
-                local vName = rawName:gsub("Vehicle$", ""):gsub("(%u)", " %1"):match("^%s*(.-)%s*$") or rawName
-                d.name.Text = vName .. " [" .. owner .. "]"
+                d.name.Text = getVehDisplayText(car)
                 d.name.Position = V2(cx, cy - h/2 - 18)
                 d.name.Visible = true
             else

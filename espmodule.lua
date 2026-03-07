@@ -31,17 +31,11 @@ M.VehBoxEnabled = false
 M.VehNameEnabled = false
 M.VehTracersEnabled = false
 M.VehHealthEnabled = false
-M.VehTrunkEnabled = false
-M.VehTrunkShowEmpty = false
-M.VehTrunkUseRemote = true
-M.VehTrunkScanInterval = 0.8
-M.VehTrunkMaxItems = 4
-M.VehTrunkRemoteDist = 250
 M.VehMaxDist = 600
 
 local tracked = {}
 local vehTracked = {}
-local trunkCache = {}
+local vehHealthCache = {}
 
 local function w2s(p)
     local v, on = Camera:WorldToViewportPoint(p)
@@ -505,12 +499,6 @@ local function makeVeh(car)
         d.hpFill = Drawing.new("Line")
         d.hpFill.Visible = false
         d.hpFill.Thickness = 2
-        d.trunkLabel = Drawing.new("Text")
-        d.trunkLabel.Visible = false
-        d.trunkLabel.Color = C3(255,170,60)
-        d.trunkLabel.Size = 12
-        d.trunkLabel.Center = true
-        d.trunkLabel.Outline = true
     end)
     vehTracked[car] = d
 end
@@ -524,9 +512,8 @@ local function nukeVeh(car)
         if d.name then d.name:Remove() end
         if d.hpBg then d.hpBg:Remove() end
         if d.hpFill then d.hpFill:Remove() end
-        if d.trunkLabel then d.trunkLabel:Remove() end
     end)
-    trunkCache[car] = nil
+    vehHealthCache[car] = nil
     vehTracked[car] = nil
 end
 
@@ -537,7 +524,6 @@ local function hideVeh(d)
         if d.name then d.name.Visible = false end
         if d.hpBg then d.hpBg.Visible = false end
         if d.hpFill then d.hpFill.Visible = false end
-        if d.trunkLabel then d.trunkLabel.Visible = false end
     end)
 end
 
@@ -548,308 +534,256 @@ local function getVehCenter(car)
     return bp and bp.Position or nil
 end
 
-local trunkNameIgnore = {
-    [""] = true,
-    success = true, status = true, error = true, message = true, result = true,
-    tools = true, items = true, inventory = true, contents = true,
-    weight = true, itemweights = true, maxweight = true, currentweight = true,
-    trunk = true, trunkpart = true, trunksystem = true, closetrunk = true,
-    civtrunk = true, lawtrunk = true, securitytrunk = true,
-    car = true, vehicle = true, body = true, owner = true, name = true, count = true,
-    ["true"] = true, ["false"] = true,
+local function normalizeVehKey(name)
+    return string.lower((tostring(name or "")):gsub("[^%w]", ""))
+end
+
+local VEH_HEALTH_KEYS = {
+    health = true, vehiclehealth = true, carhealth = true, bodyhealth = true,
+    hullhealth = true, hp = true, integrity = true, condition = true, durability = true,
+}
+local VEH_MAX_HEALTH_KEYS = {
+    maxhealth = true, vehiclemaxhealth = true, maxvehiclehealth = true,
+    carmaxhealth = true, maxcarhealth = true, bodymaxhealth = true,
+    maxintegrity = true, maxcondition = true, maxdurability = true,
+    starthealth = true, maxhp = true,
+}
+local VEH_HEALTH_PCT_KEYS = {
+    healthpercent = true, vehiclehealthpercent = true, carhealthpercent = true,
+    integritypercent = true, conditionpercent = true, durabilitypercent = true,
+}
+local VEH_DAMAGE_KEYS = {
+    damage = true, vehicledamage = true, cardamage = true, bodydamage = true, hulldamage = true,
+}
+local VEH_MAX_DAMAGE_KEYS = {
+    maxdamage = true, maxvehicledamage = true, maxcardamage = true, maxbodydamage = true, maxhulldamage = true,
 }
 
-local function trimStr(s)
-    return (s:gsub("^%s+", ""):gsub("%s+$", ""))
+local function vehSourceScore(inst, key)
+    local score = 0
+    local fullName = ""
+    pcall(function() fullName = string.lower(inst:GetFullName()) end)
+    if fullName:find("workspace.cars", 1, true) then score = score + 8 end
+    if fullName:find(".body", 1, true) then score = score + 5 end
+    if fullName:find("achassis", 1, true) then score = score + 2 end
+    if fullName:find("wheel", 1, true) then score = score - 15 end
+    if fullName:find("humanoid", 1, true) then score = score - 25 end
+
+    if key:find("health", 1, true) then score = score + 5 end
+    if key:find("vehicle", 1, true) or key:find("car", 1, true) then score = score + 3 end
+    if key:find("damage", 1, true) then score = score + 2 end
+    if key:find("max", 1, true) then score = score + 1 end
+    return score
 end
 
-local function addTrunkItem(map, name, amount)
-    if name == nil then return end
-    local n = trimStr(tostring(name))
-    if n == "" then return end
-    if #n < 2 or #n > 60 then return end
-    local l = string.lower(n)
-    if trunkNameIgnore[l] then return end
-    local c = tonumber(amount) or 1
-    if c <= 0 then return end
-    map[n] = (map[n] or 0) + c
+local function classifyVehKey(key)
+    if key == "" then return nil end
+    if VEH_HEALTH_PCT_KEYS[key] or ((key:find("percent", 1, true) or key:find("pct", 1, true)) and key:find("health", 1, true)) then
+        return "percent"
+    end
+    if VEH_MAX_DAMAGE_KEYS[key] or (key:find("max", 1, true) and key:find("damage", 1, true)) then
+        return "maxDamage"
+    end
+    if VEH_DAMAGE_KEYS[key] or key:find("damage", 1, true) then
+        return "damage"
+    end
+    if VEH_MAX_HEALTH_KEYS[key] or (key:find("max", 1, true) and (key:find("health", 1, true) or key:find("integrity", 1, true) or key:find("condition", 1, true) or key:find("durability", 1, true))) then
+        return "maxHealth"
+    end
+    if VEH_HEALTH_KEYS[key] or key:find("health", 1, true) or key:find("integrity", 1, true) or key:find("condition", 1, true) or key:find("durability", 1, true) then
+        return "health"
+    end
+    return nil
 end
 
-local function countTrunkItems(map)
-    local total = 0
-    for _, c in pairs(map) do
-        if type(c) == "number" and c > 0 then
-            total = total + c
-        end
-    end
-    return total
+local function addVehCandidate(bucket, inst, key, value)
+    local n = tonumber(value)
+    if not n or n ~= n or math.abs(n) > 1e8 then return end
+    table.insert(bucket, {
+        inst = inst,
+        key = key,
+        value = n,
+        score = vehSourceScore(inst, key),
+    })
 end
 
-local function getTrunkRoots(car)
-    local roots, seen = {}, {}
-    local function push(root)
-        if not root or seen[root] then return end
-        if root:IsA("Folder") or root:IsA("Model") then
-            seen[root] = true
-            table.insert(roots, root)
-        end
-    end
-    local function pushTrunkChildren(parent)
-        if not parent then return end
-        for _, child in ipairs(parent:GetChildren()) do
-            if (child:IsA("Folder") or child:IsA("Model")) and string.find(string.lower(child.Name), "trunk", 1, true) then
-                push(child)
-            end
-        end
-    end
-
-    local body = car and car:FindFirstChild("Body")
-    if body then
-        push(body:FindFirstChild("TrunkSystem"))
-        push(body:FindFirstChild("Trunk"))
-        pushTrunkChildren(body)
-        local ts = body:FindFirstChild("TrunkSystem")
-        pushTrunkChildren(ts)
-    end
-    push(car and car:FindFirstChild("TrunkSystem"))
-    push(car and car:FindFirstChild("Trunk"))
-    pushTrunkChildren(car)
-    return roots
-end
-
-local function readTrunkOpen(car)
-    local function readFrom(obj)
-        if not obj then return nil end
-        for _, key in ipairs({"TrunkOpen", "IsTrunkOpen"}) do
-            local v = obj:FindFirstChild(key)
-            if v and v:IsA("BoolValue") then
-                return v.Value
-            end
-            local ok, attr = pcall(function() return obj:GetAttribute(key) end)
-            if ok and type(attr) == "boolean" then
-                return attr
-            end
-        end
-        return nil
-    end
-    local body = car and car:FindFirstChild("Body")
-    local b = readFrom(body)
-    if b ~= nil then return b end
-    return readFrom(car)
-end
-
-local function scanLocalTrunkItems(car)
-    local map = {}
-    for _, root in ipairs(getTrunkRoots(car)) do
-        for _, inst in ipairs(root:GetDescendants()) do
-            if inst:IsA("Tool") then
-                addTrunkItem(map, inst.Name, 1)
-            elseif inst:IsA("ObjectValue") then
-                local v = inst.Value
-                if v and v:IsA("Tool") then
-                    addTrunkItem(map, v.Name, 1)
-                elseif type(v) == "string" then
-                    addTrunkItem(map, v, 1)
-                end
-            elseif inst:IsA("StringValue") then
-                addTrunkItem(map, inst.Value, 1)
-            elseif inst:IsA("IntValue") or inst:IsA("NumberValue") then
-                if (tonumber(inst.Value) or 0) > 0 then
-                    addTrunkItem(map, inst.Name, inst.Value)
-                end
-            end
-        end
-    end
-    return map
-end
-
-local trunkRemoteFolder = nil
-local trunkGetToolsRemote = nil
-local trunkLeoSearchRemote = nil
-
-local function getTrunkRemotes()
-    if trunkRemoteFolder and trunkRemoteFolder.Parent then
-        if trunkGetToolsRemote and trunkGetToolsRemote.Parent then
-            return trunkGetToolsRemote, trunkLeoSearchRemote
-        end
-    end
-    trunkRemoteFolder = game:GetService("ReplicatedStorage"):FindFirstChild("TrunkRemotes")
-    trunkGetToolsRemote = trunkRemoteFolder and trunkRemoteFolder:FindFirstChild("GetTools") or nil
-    trunkLeoSearchRemote = trunkRemoteFolder and trunkRemoteFolder:FindFirstChild("LEOSearch") or nil
-    return trunkGetToolsRemote, trunkLeoSearchRemote
-end
-
-local function pushArgs(out, ...)
-    local args, clean = { ... }, {}
-    for i = 1, #args do
-        if args[i] ~= nil then
-            table.insert(clean, args[i])
-        end
-    end
-    table.insert(out, clean)
-end
-
-local function parseRemoteItems(node, map, seen, depth)
-    if node == nil or depth > 5 then return end
-    local t = typeof(node)
-    if t == "Instance" then
-        if node:IsA("Tool") then
-            addTrunkItem(map, node.Name, 1)
-        elseif node:IsA("ObjectValue") and node.Value and node.Value:IsA("Tool") then
-            addTrunkItem(map, node.Value.Name, 1)
-        elseif node:IsA("StringValue") then
-            addTrunkItem(map, node.Value, 1)
-        end
-        return
-    end
-    local lt = type(node)
-    if lt == "string" then
-        addTrunkItem(map, node, 1)
-        return
-    end
-    if lt ~= "table" then return end
-    if seen[node] then return end
-    seen[node] = true
-
-    for k, v in pairs(node) do
-        local kt, vt = type(k), type(v)
-        if kt == "string" then
-            if vt == "number" and v > 0 then
-                addTrunkItem(map, k, v)
-            elseif vt == "boolean" and v then
-                addTrunkItem(map, k, 1)
-            end
-        end
-        if vt == "string" then
-            addTrunkItem(map, v, 1)
-        elseif vt == "table" or typeof(v) == "Instance" then
-            parseRemoteItems(v, map, seen, depth + 1)
-        end
-    end
-end
-
-local function tryTrunkRemote(remote, argsList)
-    local bestMap, bestCount = {}, 0
-    if not (remote and remote:IsA("RemoteFunction")) then
-        return bestMap, bestCount
-    end
-    for _, args in ipairs(argsList) do
-        local ok, res = pcall(function()
-            return remote:InvokeServer(unpack(args))
-        end)
-        if ok and res ~= nil then
-            local m = {}
-            parseRemoteItems(res, m, {}, 1)
-            local c = countTrunkItems(m)
-            if c > bestCount then
-                bestMap, bestCount = m, c
-            end
-            if c > 0 then
-                break
-            end
-        end
-    end
-    return bestMap, bestCount
-end
-
-local function fetchRemoteTrunkItems(car)
-    local getTools, leoSearch = getTrunkRemotes()
-    local body = car and car:FindFirstChild("Body")
-    local roots = getTrunkRoots(car)
-    local primaryRoot = roots[1]
-    local argsList = {}
-    pushArgs(argsList)
-    pushArgs(argsList, car)
-    pushArgs(argsList, body)
-    pushArgs(argsList, primaryRoot)
-    pushArgs(argsList, car, primaryRoot)
-    pushArgs(argsList, primaryRoot, car)
-    pushArgs(argsList, car, body)
-    pushArgs(argsList, body, car)
-    pushArgs(argsList, car and car.Name or nil)
-    pushArgs(argsList, primaryRoot and primaryRoot.Name or nil)
-
-    local m1, c1 = tryTrunkRemote(getTools, argsList)
-    if c1 > 0 then
-        return m1
-    end
-    local m2, c2 = tryTrunkRemote(leoSearch, argsList)
-    if c2 > 0 then
-        return m2
-    end
-    return {}
-end
-
-local function buildTrunkSummary(map)
-    local total = countTrunkItems(map)
-    if total <= 0 then
-        return "", false
-    end
-    local entries = {}
-    for name, count in pairs(map) do
-        table.insert(entries, {name = name, count = count})
-    end
-    table.sort(entries, function(a, b)
-        if a.count == b.count then
-            return a.name < b.name
-        end
-        return a.count > b.count
-    end)
-    local shown = {}
-    local cap = math.max(1, math.floor(tonumber(M.VehTrunkMaxItems) or 4))
-    local lim = math.min(#entries, cap)
-    for i = 1, lim do
-        local e = entries[i]
-        if e.count > 1 then
-            table.insert(shown, e.name .. " x" .. tostring(e.count))
-        else
-            table.insert(shown, e.name)
-        end
-    end
-    if #entries > lim then
-        table.insert(shown, "+" .. tostring(#entries - lim) .. " more")
-    end
-    return "[" .. tostring(total) .. "] " .. table.concat(shown, ", "), true
-end
-
-local function getVehTrunkInfo(car, dist)
-    local now = os.clock()
-    local interval = math.max(0.2, tonumber(M.VehTrunkScanInterval) or 0.8)
-    local cache = trunkCache[car]
-    if cache and (now - cache.t) < interval then
-        return cache.text, cache.hasItems
-    end
-
-    local itemMap = scanLocalTrunkItems(car)
-    local localCount = countTrunkItems(itemMap)
-    if localCount <= 0 and M.VehTrunkUseRemote and dist <= (tonumber(M.VehTrunkRemoteDist) or 250) then
-        local remoteMap = fetchRemoteTrunkItems(car)
-        local remoteCount = countTrunkItems(remoteMap)
-        if remoteCount > 0 then
-            itemMap = remoteMap
-        end
-    end
-
-    local text, hasItems = buildTrunkSummary(itemMap)
-    if not hasItems and M.VehTrunkShowEmpty then
-        local openState = readTrunkOpen(car)
-        if openState == false then
-            text = "[closed]"
-        else
-            text = "[empty]"
-        end
-    end
-
-    trunkCache[car] = {
-        t = now,
-        text = text,
-        hasItems = hasItems,
+local function collectVehHealthCandidates(car)
+    local out = {
+        health = {},
+        maxHealth = {},
+        percent = {},
+        damage = {},
+        maxDamage = {},
     }
-    return text, hasItems
+
+    local function collectFrom(inst)
+        if not inst then return end
+        if inst:IsA("NumberValue") or inst:IsA("IntValue") then
+            local key = normalizeVehKey(inst.Name)
+            local bucket = classifyVehKey(key)
+            if bucket then
+                addVehCandidate(out[bucket], inst, key, inst.Value)
+            end
+        end
+        local ok, attrs = pcall(function()
+            return inst:GetAttributes()
+        end)
+        if ok and type(attrs) == "table" then
+            for attrName, attrVal in pairs(attrs) do
+                if type(attrVal) == "number" then
+                    local key = normalizeVehKey(attrName)
+                    local bucket = classifyVehKey(key)
+                    if bucket then
+                        addVehCandidate(out[bucket], inst, key, attrVal)
+                    end
+                end
+            end
+        end
+    end
+
+    local body = car and car:FindFirstChild("Body")
+    collectFrom(car)
+    collectFrom(body)
+    if car then
+        for _, inst in ipairs(car:GetDescendants()) do
+            collectFrom(inst)
+        end
+    end
+    return out
+end
+
+local function pickVehPair(currList, maxList, invert)
+    local bestRatio, bestScore = nil, -math.huge
+    for _, c in ipairs(currList) do
+        for _, m in ipairs(maxList) do
+            local maxVal = tonumber(m.value)
+            if maxVal and maxVal > 0 then
+                local ratio = c.value / maxVal
+                if invert then
+                    ratio = 1 - ratio
+                end
+                if ratio >= -0.2 and ratio <= 1.2 then
+                    local score = c.score + m.score
+                    if c.inst == m.inst or c.inst.Parent == m.inst.Parent then
+                        score = score + 10
+                    end
+                    if maxVal >= c.value then
+                        score = score + 3
+                    else
+                        score = score - 2
+                    end
+                    if score > bestScore then
+                        bestScore = score
+                        bestRatio = math.clamp(ratio, 0, 1)
+                    end
+                end
+            end
+        end
+    end
+    if bestRatio ~= nil then
+        return bestRatio, true
+    end
+    return nil, false
+end
+
+local function pickBestVehPercent(percentList)
+    local bestRatio, bestScore = nil, -math.huge
+    for _, p in ipairs(percentList) do
+        local ratio = tonumber(p.value)
+        if ratio then
+            if ratio > 1 then
+                ratio = ratio / 100
+            end
+            if ratio >= 0 and ratio <= 1 then
+                local score = p.score + 6
+                if score > bestScore then
+                    bestScore = score
+                    bestRatio = ratio
+                end
+            end
+        end
+    end
+    if bestRatio ~= nil then
+        return math.clamp(bestRatio, 0, 1), true
+    end
+    return nil, false
+end
+
+local function pickBestVehSingle(list)
+    local best, bestScore = nil, -math.huge
+    for _, c in ipairs(list) do
+        if c.score > bestScore then
+            best = c
+            bestScore = c.score
+        end
+    end
+    return best
+end
+
+local function resolveVehHealthRatio(car, cache)
+    local candidates = collectVehHealthCandidates(car)
+
+    local ratio, ok = pickVehPair(candidates.health, candidates.maxHealth, false)
+    if ok then return ratio, true end
+
+    ratio, ok = pickVehPair(candidates.damage, candidates.maxDamage, true)
+    if ok then return ratio, true end
+
+    ratio, ok = pickVehPair(candidates.damage, candidates.maxHealth, true)
+    if ok then return ratio, true end
+
+    ratio, ok = pickBestVehPercent(candidates.percent)
+    if ok then return ratio, true end
+
+    local bestHealth = pickBestVehSingle(candidates.health)
+    if bestHealth then
+        local val = bestHealth.value
+        if val >= 0 and val <= 1 then
+            return math.clamp(val, 0, 1), true
+        end
+        if val > 1 and val <= 100 then
+            return math.clamp(val / 100, 0, 1), true
+        end
+        if val > 0 then
+            cache.maxObserved = math.max(cache.maxObserved or 0, val)
+            if (cache.maxObserved or 0) > 0 then
+                return math.clamp(val / cache.maxObserved, 0, 1), true
+            end
+        end
+    end
+
+    local bestDamage = pickBestVehSingle(candidates.damage)
+    if bestDamage then
+        local val = bestDamage.value
+        if val >= 0 and val <= 1 then
+            return math.clamp(1 - val, 0, 1), true
+        end
+        if val > 1 and val <= 100 then
+            return math.clamp(1 - (val / 100), 0, 1), true
+        end
+    end
+
+    return nil, false
+end
+
+local function getVehHealthRatio(car)
+    local now = os.clock()
+    local cache = vehHealthCache[car]
+    if cache and (now - (cache.lastScan or 0)) < 0.5 then
+        return cache.ratio, cache.valid
+    end
+
+    cache = cache or { maxObserved = 0 }
+    local ratio, valid = resolveVehHealthRatio(car, cache)
+    cache.lastScan = now
+    cache.ratio = ratio
+    cache.valid = valid
+    vehHealthCache[car] = cache
+    return ratio, valid
 end
 
 RunService.Heartbeat:Connect(function()
-    local anyVehOn = M.VehBoxEnabled or M.VehNameEnabled or M.VehTracersEnabled or M.VehHealthEnabled or M.VehTrunkEnabled
+    local anyVehOn = M.VehBoxEnabled or M.VehNameEnabled or M.VehTracersEnabled or M.VehHealthEnabled
     if not anyVehOn then
         for car, d in pairs(vehTracked) do hideVeh(d) end
         return
@@ -908,42 +842,25 @@ RunService.Heartbeat:Connect(function()
                 d.tracer.Visible = false
             end
             if M.VehHealthEnabled then
-                local hp = 1
-                pcall(function()
-                    local body = car:FindFirstChild("Body")
-                    if body then
-                        local hVal = body:FindFirstChild("Health") or car:FindFirstChild("Health")
-                        if hVal and hVal:IsA("NumberValue") then
-                            local maxH = body:FindFirstChild("MaxHealth") or car:FindFirstChild("MaxHealth")
-                            local maxV = maxH and maxH.Value or 100
-                            hp = math.clamp(hVal.Value / maxV, 0, 1)
-                        end
-                    end
-                end)
-                local bx = cx - w - 5
-                local bt = cy - h/2
-                local bb = cy + h/2
-                d.hpBg.From = V2(bx, bb); d.hpBg.To = V2(bx, bt); d.hpBg.Visible = true
-                d.hpFill.From = V2(bx, bb)
-                d.hpFill.To = V2(bx, bb - (bb-bt)*hp)
-                d.hpFill.Color = C3(255,0,0):Lerp(C3(0,255,0), hp)
-                d.hpFill.Visible = true
+                local hp, hpOk = getVehHealthRatio(car)
+                if hpOk and hp ~= nil then
+                    local bx = cx - w - 5
+                    local bt = cy - h/2
+                    local bb = cy + h/2
+                    d.hpBg.From = V2(bx, bb)
+                    d.hpBg.To = V2(bx, bt)
+                    d.hpBg.Visible = true
+                    d.hpFill.From = V2(bx, bb)
+                    d.hpFill.To = V2(bx, bb - (bb-bt)*hp)
+                    d.hpFill.Color = C3(255,0,0):Lerp(C3(0,255,0), hp)
+                    d.hpFill.Visible = true
+                else
+                    d.hpBg.Visible = false
+                    d.hpFill.Visible = false
+                end
             else
                 d.hpBg.Visible = false
                 d.hpFill.Visible = false
-            end
-            if M.VehTrunkEnabled then
-                local summary, hasItems = getVehTrunkInfo(car, dist)
-                if summary ~= "" then
-                    d.trunkLabel.Text = summary
-                    d.trunkLabel.Color = hasItems and C3(255,170,60) or C3(120,255,120)
-                    d.trunkLabel.Position = V2(cx, cy + h/2 + 4)
-                    d.trunkLabel.Visible = true
-                else
-                    d.trunkLabel.Visible = false
-                end
-            else
-                d.trunkLabel.Visible = false
             end
         end)
     end
@@ -993,32 +910,21 @@ end
 function API:SetVehBoxEsp(s) M.VehBoxEnabled = s end
 function API:SetVehNameEsp(s) M.VehNameEnabled = s end
 function API:SetVehTracers(s) M.VehTracersEnabled = s end
-function API:SetVehHealthEsp(s) M.VehHealthEnabled = s end
-function API:SetVehTrunkEsp(s) M.VehTrunkEnabled = s end
-function API:SetVehTrunkShowEmpty(s)
-    M.VehTrunkShowEmpty = s
-    for car in pairs(trunkCache) do
-        trunkCache[car] = nil
+function API:SetVehHealthEsp(s)
+    M.VehHealthEnabled = s
+    if not s then
+        for car in pairs(vehHealthCache) do
+            vehHealthCache[car] = nil
+        end
     end
 end
-function API:SetVehTrunkUseRemote(s)
-    M.VehTrunkUseRemote = s
-    for car in pairs(trunkCache) do
-        trunkCache[car] = nil
-    end
-end
-function API:SetVehTrunkScanInterval(v)
-    M.VehTrunkScanInterval = math.max(0.2, tonumber(v) or M.VehTrunkScanInterval)
-end
-function API:SetVehTrunkMaxItems(v)
-    M.VehTrunkMaxItems = math.max(1, math.floor(tonumber(v) or M.VehTrunkMaxItems))
-    for car in pairs(trunkCache) do
-        trunkCache[car] = nil
-    end
-end
-function API:SetVehTrunkRemoteDist(v)
-    M.VehTrunkRemoteDist = math.max(10, tonumber(v) or M.VehTrunkRemoteDist)
-end
+-- Legacy no-op methods kept for older scripts that still call trunk APIs.
+function API:SetVehTrunkEsp(_) end
+function API:SetVehTrunkShowEmpty(_) end
+function API:SetVehTrunkUseRemote(_) end
+function API:SetVehTrunkScanInterval(_) end
+function API:SetVehTrunkMaxItems(_) end
+function API:SetVehTrunkRemoteDist(_) end
 function API:SetHeldItemEsp(s) M.HeldItemEnabled = s end
 function API:SetAdminHeldItem(s) M.AdminHeldItemEnabled = s end
 return API

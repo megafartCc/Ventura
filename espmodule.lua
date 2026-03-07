@@ -36,6 +36,7 @@ M.VehMaxDist = 600
 local tracked = {}
 local vehTracked = {}
 local vehHealthCache = {}
+local vehBoxCache = {}
 
 local function w2s(p)
     local v, on = Camera:WorldToViewportPoint(p)
@@ -514,6 +515,7 @@ local function nukeVeh(car)
         if d.hpFill then d.hpFill:Remove() end
     end)
     vehHealthCache[car] = nil
+    vehBoxCache[car] = nil
     vehTracked[car] = nil
 end
 
@@ -579,23 +581,88 @@ local VEH_BOX_EDGES = {
 
 local function getVehBoundingBox(car)
     if not car then return nil, nil end
-    local ok, cf, sz = pcall(function()
-        return car:GetBoundingBox()
-    end)
-    if ok and cf and sz and sz.Magnitude > 0 then
-        return cf, sz
+    local now = os.clock()
+    local cached = vehBoxCache[car]
+    if cached and (now - cached.t) < 0.08 then
+        return cached.cf, cached.sz
     end
 
     local center = getVehCenter(car)
-    if center then
-        local ok2, ext = pcall(function()
-            return car:GetExtentsSize()
-        end)
-        if ok2 and ext and ext.Magnitude > 0 then
-            return CFrame.new(center), ext
+    if not center then return nil, nil end
+
+    local refPart = car:FindFirstChild("DriveSeat", true)
+    if not (refPart and refPart:IsA("BasePart")) then
+        local body = car:FindFirstChild("Body")
+        if body and body:IsA("Model") and body.PrimaryPart then
+            refPart = body.PrimaryPart
+        elseif car.PrimaryPart then
+            refPart = car.PrimaryPart
+        else
+            refPart = car:FindFirstChildWhichIsA("BasePart", true)
         end
     end
-    return nil, nil
+
+    local orientCf
+    if refPart and refPart:IsA("BasePart") then
+        orientCf = CFrame.lookAt(center, center + refPart.CFrame.LookVector, refPart.CFrame.UpVector)
+    else
+        local okPivot, pivot = pcall(function()
+            return car:GetPivot()
+        end)
+        if okPivot and pivot then
+            orientCf = CFrame.lookAt(center, center + pivot.LookVector, pivot.UpVector)
+        else
+            orientCf = CFrame.new(center)
+        end
+    end
+
+    local inv = orientCf:Inverse()
+    local minX, minY, minZ = math.huge, math.huge, math.huge
+    local maxX, maxY, maxZ = -math.huge, -math.huge, -math.huge
+    local seenPoint = false
+
+    for _, inst in ipairs(car:GetDescendants()) do
+        if inst:IsA("BasePart") then
+            local h = inst.Size * 0.5
+            local pcf = inst.CFrame
+            for sx = -1, 1, 2 do
+                for sy = -1, 1, 2 do
+                    for sz = -1, 1, 2 do
+                        local world = pcf * Vector3.new(h.X * sx, h.Y * sy, h.Z * sz)
+                        local lp = inv:PointToObjectSpace(world)
+                        if lp.X < minX then minX = lp.X end
+                        if lp.Y < minY then minY = lp.Y end
+                        if lp.Z < minZ then minZ = lp.Z end
+                        if lp.X > maxX then maxX = lp.X end
+                        if lp.Y > maxY then maxY = lp.Y end
+                        if lp.Z > maxZ then maxZ = lp.Z end
+                        seenPoint = true
+                    end
+                end
+            end
+        end
+    end
+
+    if not seenPoint then return nil, nil end
+
+    local localCenter = Vector3.new(
+        (minX + maxX) * 0.5,
+        (minY + maxY) * 0.5,
+        (minZ + maxZ) * 0.5
+    )
+    local size = Vector3.new(
+        math.max(0.1, maxX - minX),
+        math.max(0.1, maxY - minY),
+        math.max(0.1, maxZ - minZ)
+    )
+    local boxCf = orientCf * CFrame.new(localCenter)
+
+    vehBoxCache[car] = {
+        t = now,
+        cf = boxCf,
+        sz = size,
+    }
+    return boxCf, size
 end
 
 local function projectVehBounds(boxCf, boxSize)
@@ -1177,13 +1244,6 @@ function API:SetVehHealthEsp(s)
         end
     end
 end
--- Legacy no-op methods kept for older scripts that still call trunk APIs.
-function API:SetVehTrunkEsp(_) end
-function API:SetVehTrunkShowEmpty(_) end
-function API:SetVehTrunkUseRemote(_) end
-function API:SetVehTrunkScanInterval(_) end
-function API:SetVehTrunkMaxItems(_) end
-function API:SetVehTrunkRemoteDist(_) end
 function API:SetHeldItemEsp(s) M.HeldItemEnabled = s end
 function API:SetAdminHeldItem(s) M.AdminHeldItemEnabled = s end
 return API

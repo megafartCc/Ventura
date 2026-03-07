@@ -1,5 +1,4 @@
 local Players = game:GetService("Players")
-local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local Camera = workspace.CurrentCamera
 local LP = Players.LocalPlayer

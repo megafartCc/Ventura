@@ -665,7 +665,6 @@ function API:SetVehBoxEsp(s) M.VehBoxEnabled = s end
 function API:SetVehNameEsp(s) M.VehNameEnabled = s end
 function API:SetVehTracers(s) M.VehTracersEnabled = s end
 function API:SetVehHealthEsp(s) M.VehHealthEnabled = s end
-function API:SetVehTrunkEsp(_) end
 function API:SetHeldItemEsp(s) M.HeldItemEnabled = s end
 function API:SetAdminHeldItem(s) M.AdminHeldItemEnabled = s end
 return API

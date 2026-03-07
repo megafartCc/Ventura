@@ -788,6 +788,7 @@ end
 
 local VEH_CONTAINER_NAMES = {
     "Cars",
+    "InsertedCars",
     "Vehicles",
     "PlayerVehicles",
     "PlayerCars",

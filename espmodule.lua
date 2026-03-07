@@ -475,7 +475,7 @@ local function makeVeh(car)
     local d = {}
     pcall(function()
         d.box = {}
-        for i = 1, 4 do
+        for i = 1, 12 do
             local l = Drawing.new("Line")
             l.Visible = false
             l.Color = C3(0,200,255)
@@ -558,6 +558,111 @@ local function getVehCenter(car)
     if pp then return pp.Position end
     local bp = car:FindFirstChildWhichIsA("BasePart", true)
     return bp and bp.Position or nil
+end
+
+local VEH_BOX_CORNER_SIGNS = {
+    {-1,  1, -1},
+    { 1,  1, -1},
+    { 1,  1,  1},
+    {-1,  1,  1},
+    {-1, -1, -1},
+    { 1, -1, -1},
+    { 1, -1,  1},
+    {-1, -1,  1},
+}
+
+local VEH_BOX_EDGES = {
+    {1, 2}, {2, 3}, {3, 4}, {4, 1},
+    {5, 6}, {6, 7}, {7, 8}, {8, 5},
+    {1, 5}, {2, 6}, {3, 7}, {4, 8},
+}
+
+local function getVehBoundingBox(car)
+    if not car then return nil, nil end
+    local ok, cf, sz = pcall(function()
+        return car:GetBoundingBox()
+    end)
+    if ok and cf and sz and sz.Magnitude > 0 then
+        return cf, sz
+    end
+
+    local center = getVehCenter(car)
+    if center then
+        local ok2, ext = pcall(function()
+            return car:GetExtentsSize()
+        end)
+        if ok2 and ext and ext.Magnitude > 0 then
+            return CFrame.new(center), ext
+        end
+    end
+    return nil, nil
+end
+
+local function projectVehBounds(boxCf, boxSize)
+    if not boxCf or not boxSize then return nil, nil, false end
+
+    local hx, hy, hz = boxSize.X * 0.5, boxSize.Y * 0.5, boxSize.Z * 0.5
+    local projected = {}
+    local minX, maxX, minY, maxY
+    local anyOnScreen = false
+
+    for i, s in ipairs(VEH_BOX_CORNER_SIGNS) do
+        local world = boxCf * Vector3.new(s[1] * hx, s[2] * hy, s[3] * hz)
+        local vp, on = Camera:WorldToViewportPoint(world)
+        local entry = {
+            p = V2(vp.X, vp.Y),
+            z = vp.Z,
+            on = on,
+        }
+        projected[i] = entry
+
+        if entry.z > 0 then
+            if entry.on then anyOnScreen = true end
+            local x, y = entry.p.X, entry.p.Y
+            if minX == nil then
+                minX, maxX = x, x
+                minY, maxY = y, y
+            else
+                if x < minX then minX = x end
+                if x > maxX then maxX = x end
+                if y < minY then minY = y end
+                if y > maxY then maxY = y end
+            end
+        end
+    end
+
+    if minX == nil then
+        return projected, nil, false
+    end
+
+    return projected, {
+        minX = minX,
+        maxX = maxX,
+        minY = minY,
+        maxY = maxY,
+        cx = (minX + maxX) * 0.5,
+        cy = (minY + maxY) * 0.5,
+        w = maxX - minX,
+        h = maxY - minY,
+    }, anyOnScreen
+end
+
+local function drawVeh3DBox(d, projected)
+    local any = false
+    for i, edge in ipairs(VEH_BOX_EDGES) do
+        local line = d.box[i]
+        local a = projected[edge[1]]
+        local b = projected[edge[2]]
+        if line and a and b and a.z > 0 and b.z > 0 and (a.on or b.on) then
+            line.From = a.p
+            line.To = b.p
+            line.Visible = true
+            any = true
+        elseif line then
+            line.Visible = false
+        end
+    end
+    return any
 end
 
 local function trimStr(s)
@@ -961,28 +1066,27 @@ RunService.Heartbeat:Connect(function()
     for car, d in pairs(vehTracked) do
         pcall(function()
             if not car.Parent or not isVehicleModel(car) then nukeVeh(car) return end
-            local pos = getVehCenter(car)
-            if not pos then hideVeh(d) return end
+            local boxCf, boxSize = getVehBoundingBox(car)
+            if not boxCf or not boxSize then hideVeh(d) return end
+            local pos = boxCf.Position
             local dist = (pos - myR.Position).Magnitude
             if dist > M.VehMaxDist then hideVeh(d) return end
-            local sv, onS = Camera:WorldToViewportPoint(pos)
-            if not onS then hideVeh(d) return end
-            local tP = Camera:WorldToViewportPoint(pos + Vector3.new(0,4,0))
-            local bP = Camera:WorldToViewportPoint(pos - Vector3.new(0,2,0))
-            local h = math.abs(bP.Y - tP.Y)
-            local w = h * 1.2
-            local cx, cy = sv.X, sv.Y
+            local projected, screen, anyOnScreen = projectVehBounds(boxCf, boxSize)
+            if not screen or not anyOnScreen then hideVeh(d) return end
+
+            local cx, cy = screen.cx, screen.cy
+            local h = math.max(screen.h, 10)
+            local w = math.max(screen.w, 10)
             if M.VehBoxEnabled then
-                d.box[1].From = V2(cx-w, cy-h/2); d.box[1].To = V2(cx+w, cy-h/2); d.box[1].Visible = true
-                d.box[2].From = V2(cx-w, cy+h/2); d.box[2].To = V2(cx+w, cy+h/2); d.box[2].Visible = true
-                d.box[3].From = V2(cx-w, cy-h/2); d.box[3].To = V2(cx-w, cy+h/2); d.box[3].Visible = true
-                d.box[4].From = V2(cx+w, cy-h/2); d.box[4].To = V2(cx+w, cy+h/2); d.box[4].Visible = true
+                drawVeh3DBox(d, projected)
             else
-                for i=1,4 do d.box[i].Visible = false end
+                for i = 1, #d.box do
+                    d.box[i].Visible = false
+                end
             end
             if M.VehNameEnabled then
                 d.name.Text = getVehDisplayText(car)
-                d.name.Position = V2(cx, cy - h/2 - 18)
+                d.name.Position = V2(cx, screen.minY - 16)
                 d.name.Visible = true
             else
                 d.name.Visible = false
@@ -991,7 +1095,7 @@ RunService.Heartbeat:Connect(function()
                 local ox = Camera.ViewportSize.X / 2
                 local oy = Camera.ViewportSize.Y
                 d.tracer.From = V2(ox, oy)
-                d.tracer.To = V2(cx, cy + h/2)
+                d.tracer.To = V2(cx, screen.maxY)
                 d.tracer.Visible = true
             else
                 d.tracer.Visible = false
@@ -999,9 +1103,9 @@ RunService.Heartbeat:Connect(function()
             if M.VehHealthEnabled then
                 local hp, hpOk = getVehHealthRatio(car)
                 if hpOk and hp ~= nil then
-                    local bx = cx - w - 5
-                    local bt = cy - h/2
-                    local bb = cy + h/2
+                    local bx = screen.minX - 5
+                    local bt = screen.minY
+                    local bb = screen.maxY
                     d.hpBg.From = V2(bx, bb)
                     d.hpBg.To = V2(bx, bt)
                     d.hpBg.Visible = true

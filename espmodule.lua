@@ -1146,15 +1146,22 @@ RunService.Heartbeat:Connect(function()
         return
     end
     -- Track new cars
+    local _trackCount = 0
     for _, car in ipairs(vehicles) do
         if not vehTracked[car] then
             makeVeh(car)
         end
+        if vehTracked[car] then _trackCount = _trackCount + 1 end
     end
+    if dbg then warn("[VehESP] vehTracked count:", _trackCount) end
     -- Render
     for car, d in pairs(vehTracked) do
-        pcall(function()
-            if not car.Parent or not isVehicleModel(car) then nukeVeh(car) return end
+        local ok2, err2 = pcall(function()
+            if dbg then warn("[VehESP] Render enter:", car.Name, "hasParent:", car.Parent ~= nil) end
+            if not car.Parent or not isVehicleModel(car) then
+                if dbg then warn("[VehESP] NUKED:", car.Name, "parent:", car.Parent, "isVeh:", isVehicleModel(car)) end
+                nukeVeh(car) return
+            end
             local boxCf, boxSize = getVehBoundingBox(car)
             if not boxCf or not boxSize then
                 if dbg then warn("[VehESP] No bbox for:", car.Name) end
@@ -1215,6 +1222,7 @@ RunService.Heartbeat:Connect(function()
                 d.hpFill.Visible = false
             end
         end)
+        if not ok2 and dbg then warn("[VehESP] Render pcall error:", err2) end
     end
 end)
 

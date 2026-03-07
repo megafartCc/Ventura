@@ -629,11 +629,23 @@ RunService.Heartbeat:Connect(function()
             local sv, onS = Camera:WorldToViewportPoint(pos)
             if not onS then hideVeh(d) return end
 
-            -- 3D bounding box
+            -- 3D bounding box (use Body sub-model for tighter fit)
             local boxCf, boxSz
-            pcall(function() boxCf, boxSz = car:GetBoundingBox() end)
+            pcall(function()
+                local body = car:FindFirstChild("Body")
+                if body then
+                    local mdl = body:FindFirstChild("Model")
+                    if mdl then
+                        boxCf, boxSz = mdl:GetBoundingBox()
+                    else
+                        boxCf, boxSz = body:GetBoundingBox()
+                    end
+                else
+                    boxCf, boxSz = car:GetBoundingBox()
+                end
+            end)
 
-            local screenMinY, screenMaxY, screenCx = sv.Y, sv.Y, sv.X
+            local screenMinY, screenMaxY, screenCx, screenMinX = sv.Y, sv.Y, sv.X, sv.X
 
             if M.VehBoxEnabled and boxCf and boxSz then
                 local hx, hy, hz = boxSz.X/2, boxSz.Y/2, boxSz.Z/2
@@ -649,12 +661,13 @@ RunService.Heartbeat:Connect(function()
                 }
                 local corners2D = {}
                 local anyVisible = false
-                local minSY, maxSY, sumX, cntX = math.huge, -math.huge, 0, 0
+                local minSX, minSY, maxSY, sumX, cntX = math.huge, math.huge, -math.huge, 0, 0
                 for i, c3 in ipairs(corners3D) do
                     local v3, on2 = Camera:WorldToViewportPoint(c3)
                     corners2D[i] = { x = v3.X, y = v3.Y, vis = on2 and v3.Z > 0 }
                     if corners2D[i].vis then
                         anyVisible = true
+                        if v3.X < minSX then minSX = v3.X end
                         if v3.Y < minSY then minSY = v3.Y end
                         if v3.Y > maxSY then maxSY = v3.Y end
                         sumX = sumX + v3.X
@@ -662,6 +675,7 @@ RunService.Heartbeat:Connect(function()
                     end
                 end
                 if anyVisible then
+                    screenMinX = minSX
                     screenMinY = minSY
                     screenMaxY = maxSY
                     if cntX > 0 then screenCx = sumX / cntX end
@@ -712,7 +726,7 @@ RunService.Heartbeat:Connect(function()
             end
             if M.VehHealthEnabled then
                 local hp = getVehHealth(car)
-                local bx = screenCx - 30
+                local bx = screenMinX - 5
                 local bt = screenMinY
                 local bb = screenMaxY
                 if bb - bt < 10 then bb = bt + 10 end

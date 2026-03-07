@@ -1104,14 +1104,32 @@ local function getVehHealthRatio(car)
     return ratio, valid
 end
 
+local _vehDbgLast = 0
 RunService.Heartbeat:Connect(function()
     local anyVehOn = M.VehBoxEnabled or M.VehNameEnabled or M.VehTracersEnabled or M.VehHealthEnabled
     if not anyVehOn then
         for car, d in pairs(vehTracked) do hideVeh(d) end
         return
     end
+    local now = os.clock()
+    local dbg = (now - _vehDbgLast) > 5
+    if dbg then _vehDbgLast = now end
     local vehicles = gatherVehicleModels()
+    if dbg then warn("[VehESP] gatherVehicleModels found:", #vehicles) end
     if #vehicles == 0 then
+        if dbg then
+            local carsFolder = workspace:FindFirstChild("Cars")
+            warn("[VehESP] Cars folder exists:", carsFolder ~= nil, "children:", carsFolder and #carsFolder:GetChildren() or 0)
+            if carsFolder then
+                for _, ch in ipairs(carsFolder:GetChildren()) do
+                    local isM = ch:IsA("Model")
+                    local body = ch:FindFirstChild("Body")
+                    local info = body and body:FindFirstChild("Info")
+                    local cm = info and info:FindFirstChild("CarModel")
+                    warn("[VehESP]   child:", ch.Name, "isModel:", isM, "hasBody:", body ~= nil, "hasInfo:", info ~= nil, "hasCarModel:", cm ~= nil)
+                end
+            end
+        end
         for car, d in pairs(vehTracked) do
             if not car.Parent then
                 nukeVeh(car)
@@ -1123,7 +1141,10 @@ RunService.Heartbeat:Connect(function()
     end
     local me = LP.Character
     local myR = me and me:FindFirstChild("HumanoidRootPart")
-    if not myR then return end
+    if not myR then
+        if dbg then warn("[VehESP] No HRP") end
+        return
+    end
     -- Track new cars
     for _, car in ipairs(vehicles) do
         if not vehTracked[car] then
@@ -1135,12 +1156,16 @@ RunService.Heartbeat:Connect(function()
         pcall(function()
             if not car.Parent or not isVehicleModel(car) then nukeVeh(car) return end
             local boxCf, boxSize = getVehBoundingBox(car)
-            if not boxCf or not boxSize then hideVeh(d) return end
+            if not boxCf or not boxSize then
+                if dbg then warn("[VehESP] No bbox for:", car.Name) end
+                hideVeh(d) return
+            end
             local pos = boxCf.Position
             local dist = (pos - myR.Position).Magnitude
             if dist > M.VehMaxDist then hideVeh(d) return end
             local projected, screen, anyOnScreen = projectVehBounds(boxCf, boxSize)
             if not screen or not anyOnScreen then hideVeh(d) return end
+            if dbg then warn("[VehESP] Rendering:", car.Name, "dist:", math.floor(dist)) end
 
             local cx, cy = screen.cx, screen.cy
             local h = math.max(screen.h, 10)
